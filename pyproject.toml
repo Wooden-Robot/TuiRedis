@@ -1,0 +1,69 @@
+[project]
+name = "tuiredis"
+version = "0.2.0"
+description = "A beautiful Redis TUI client built with Textual"
+authors = [
+    { name = "woodenrobot" }
+]
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["redis", "tui", "textual", "cli", "client"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+]
+dependencies = [
+    "textual>=8.0.0",
+    "redis>=5.0.0",
+    "iredis>=1.14.0",
+    "sshtunnel>=0.4.0",
+]
+
+
+[project.scripts]
+tuiredis = "tuiredis.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tuiredis"]
+
+[project.urls]
+Homepage = "https://github.com/Wooden-Robot/tuiredis"
+Repository = "https://github.com/Wooden-Robot/tuiredis.git"
+Issues = "https://github.com/Wooden-Robot/tuiredis/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.15.2",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "W", "I"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+asyncio_mode = "auto"
+testpaths = [
+    "tests/"
+]

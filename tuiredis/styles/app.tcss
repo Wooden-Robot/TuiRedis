@@ -1,0 +1,171 @@
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   TRedis — Global Styles
+   A Redis-branded dark theme
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+/* ── Color Variables (via Textual design system) ── */
+$accent: #DC382D;
+$accent-lighten-1: #E85D54;
+$accent-darken-1: #B22E25;
+
+/* ── Screens ── */
+Screen {
+    background: $surface-darken-2;
+}
+
+/* ── Header / Footer ── */
+Header {
+    background: #DC382D;
+    color: white;
+}
+
+Footer {
+    background: $surface-darken-1;
+}
+
+/* ── Tree Widget ── */
+Tree {
+    background: $surface-darken-1;
+    scrollbar-size: 1 1;
+    padding: 1 0;
+}
+
+Tree > .tree--cursor {
+    background: #DC382D 30%;
+    color: $text;
+    text-style: bold;
+}
+
+Tree > .tree--highlight {
+    background: #DC382D 15%;
+}
+
+Tree:focus > .tree--cursor {
+    background: #DC382D 50%;
+}
+
+/* ── Data Tables ── */
+DataTable {
+    height: 1fr;
+    scrollbar-size: 1 1;
+}
+
+DataTable > .datatable--header {
+    background: #DC382D 20%;
+    color: $text;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #DC382D 30%;
+    color: $text;
+}
+
+DataTable:focus > .datatable--cursor {
+    background: #DC382D 50%;
+}
+
+/* ── Input Fields ── */
+Input {
+    border: tall $surface-lighten-2;
+    background: $surface-darken-1;
+}
+
+Input:focus {
+    border: tall #DC382D;
+}
+
+/* ── Buttons ── */
+Button {
+    border: none;
+}
+
+Button.-primary {
+    background: #DC382D;
+    color: white;
+}
+
+Button.-primary:hover {
+    background: #E85D54;
+}
+
+Button.-success {
+    background: #4CAF50;
+    color: white;
+}
+
+Button.-success:hover {
+    background: #66BB6A;
+}
+
+Button.-error {
+    background: #C62828;
+    color: white;
+}
+
+Button.-error:hover {
+    background: #E53935;
+}
+
+/* ── TextArea ── */
+TextArea {
+    height: 1fr;
+    border: tall $surface-lighten-2;
+    background: $surface-darken-1;
+}
+
+TextArea:focus {
+    border: tall #DC382D;
+}
+
+/* ── Tabs ── */
+TabbedContent {
+    height: 1fr;
+}
+
+Tabs {
+    background: $surface-darken-1;
+}
+
+Tab {
+    padding: 0 2;
+}
+
+Tab.-active {
+    color: #DC382D;
+    text-style: bold;
+}
+
+Underline > .underline--bar {
+    color: #DC382D;
+}
+
+TabPane {
+    padding: 0;
+}
+
+/* ── RichLog (Console) ── */
+RichLog {
+    background: #1a1a2e;
+    color: #eee;
+    scrollbar-size: 1 1;
+}
+
+/* ── Notify Toast ── */
+Toast {
+    background: $surface;
+    border-left: outer #DC382D;
+}
+
+/* ── Scrollbar ── */
+Scrollbar {
+    background: $surface-darken-1;
+}
+
+ScrollbarSlider {
+    color: $surface-lighten-2;
+}
+
+ScrollbarSlider:hover {
+    color: #DC382D;
+}
