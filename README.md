@@ -6,6 +6,10 @@ A beautiful, high-performance Redis Terminal UI built with Python & [Textual](ht
 
 [English](README.md) | [中文说明](README_zh-CN.md)
 
+<br>
+<img src="./docs/imgs/1.png" alt="TuiRedis Main View" width="800">
+<img src="./docs/imgs/2.png" alt="TuiRedis Value View" width="800">
+
 </div>
 
 ---

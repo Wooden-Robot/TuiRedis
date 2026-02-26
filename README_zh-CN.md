@@ -6,6 +6,10 @@
 
 [English](README.md) | [中文说明](README_zh-CN.md)
 
+<br>
+<img src="./docs/imgs/1.png" alt="TuiRedis 主要视图" width="800">
+<img src="./docs/imgs/2.png" alt="TuiRedis 数值视图" width="800">
+
 </div>
 
 ---
