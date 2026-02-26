@@ -328,6 +328,10 @@ class ConnectScreen(Screen):
         elif event.button.id == "new-conn-btn":
             self._clear_form()
 
+    def action_quit(self) -> None:
+        """Exit the application when q is pressed."""
+        self.app.exit()
+
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """Allow pressing Enter in any input to connect."""
         await self._do_connect()

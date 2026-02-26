@@ -48,3 +48,23 @@ async def test_connect_screen(mock_redis_client):
             err_msg = app.screen.query_one("#connect-error", Static).renderable
             pytest.fail(f"Did not transition. UI Error: {err_msg}")
         assert not isinstance(app.screen, ConnectScreen)
+
+
+@pytest.mark.asyncio
+async def test_connect_screen_quit_action_input(mock_redis_client):
+    """Test quit action behavior in ConnectScreen when focused on input."""
+    app = TRedisApp()
+    async with app.run_test(size=(120, 80)) as pilot:
+        # Start at connect screen
+        assert isinstance(app.screen, ConnectScreen)
+
+        # Focus host input
+        host_input = app.screen.query_one("#host-input", Input)
+        host_input.focus()
+        await pilot.pause()
+
+        # q should NOT quit app, but input a 'q'
+        await pilot.press("q")
+        await pilot.pause()
+        assert app.is_running is True
+        assert "q" in host_input.value
