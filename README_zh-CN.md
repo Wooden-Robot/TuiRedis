@@ -23,8 +23,26 @@
 - **🛠️ IRedis 强强联合** — 内置快捷键，一键吊起 `iredis` 交互式命令行环境。
 
 ### 📦 安装指南
-推荐使用现代化的 Python 包管理工具 `uv` 进行依赖安装。
+TuiRedis 已经发布至 PyPI，您可以使用常用的 Python 包管理工具进行安装。
 
+**使用 pipx (推荐)**
+```bash
+pipx install tuiredis
+```
+
+**使用 uvx / uv**
+```bash
+uvx tuiredis
+# 或
+uv tool install tuiredis
+```
+
+**使用 pip**
+```bash
+pip install tuiredis
+```
+
+**从源码安装**
 ```bash
 # 克隆项目仓库
 git clone https://github.com/Wooden-Robot/tuiredis.git

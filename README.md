@@ -23,8 +23,26 @@ A beautiful, high-performance Redis Terminal UI built with Python & [Textual](ht
 - **🛠️ IRedis Integration** — One-click launch into `iredis` terminal via internal bindings.
 
 ### 📦 Installation
-TRedis is built using modern Python tooling (`uv`).
+TuiRedis is available on PyPI and can be installed using your preferred Python package manager.
 
+**Using pipx (Recommended)**
+```bash
+pipx install tuiredis
+```
+
+**Using uvx / uv**
+```bash
+uvx tuiredis
+# or
+uv tool install tuiredis
+```
+
+**Using pip**
+```bash
+pip install tuiredis
+```
+
+**From Source**
 ```bash
 # Clone the repository
 git clone https://github.com/Wooden-Robot/tuiredis.git
