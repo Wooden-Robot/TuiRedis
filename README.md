@@ -54,21 +54,25 @@ cd tuiredis
 
 # Sync dependencies using uv
 uv sync
+
+# Run the project
+uv run tuiredis
 ```
 
 ### 💻 Usage
+If you installed TuiRedis via `pipx` or `pip`, you can start it directly from the terminal by running `tuiredis`. If you cloned from the source, you should use `uv run tuiredis` instead.
 ```bash
-# Launch TRedis with the Interactive Connection Dialog
-uv run tuiredis
+# Launch TuiRedis with the Interactive Connection Dialog
+tuiredis
 
 # Fast connect via CLI arguments
-uv run tuiredis -H 127.0.0.1 -p 6379 -n 0 -c
+tuiredis -H 127.0.0.1 -p 6379 -a mypassword -n 0 -c
 
 # Connect securely via an SSH Tunnel
-uv run tuiredis -H 127.0.0.1 -p 6379 --ssh-host my-bastion.com --ssh-user root -c
+tuiredis -H 127.0.0.1 -p 6379 --ssh-host my-bastion.com --ssh-user root --ssh-key ~/.ssh/id_rsa -c
 
 # Show all available CLI options
-uv run tuiredis --help
+tuiredis --help
 ```
 
 ### ⌨️ Keyboard Shortcuts
@@ -79,6 +83,7 @@ uv run tuiredis --help
 | `/` | Focus search bar |
 | `n` | Create a New Key |
 | `Tab` | Switch between active panels |
+| `Ctrl+o`| Switch Connection |
 | `Ctrl+t`| Launch IRedis Terminal (`uv` will prompt to install if missing) |
 | `Ctrl+i`| Toggle Server Info Panel |
 

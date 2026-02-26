@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, Select, Static, TabbedContent, TabPane
+from textual.widgets import Button, Footer, Header, Input, RadioButton, RadioSet, Select, Static, TabbedContent, TabPane
 
 from tuiredis.widgets.command_input import CommandInput
 from tuiredis.widgets.key_detail import KeyDetail
@@ -19,6 +19,10 @@ from tuiredis.widgets.value_viewer import ValueViewer
 
 class MainScreen(Screen):
     """Main workspace screen with key browser, value viewer, and console."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._virtual_keys: dict[str, str] = {}
 
     BINDINGS = [
         Binding("q", "quit", "Quit", priority=True),
@@ -98,11 +102,21 @@ class MainScreen(Screen):
         display: block;
     }
     #new-key-card {
-        width: 50;
+        width: 60;
         height: auto;
         padding: 2;
         background: $surface;
         border: heavy #DC382D;
+    }
+    #nk-type-radios {
+        height: auto;
+        layout: horizontal;
+        margin: 0 0 1 0;
+    }
+    #nk-type-radios RadioButton {
+        width: auto;
+        margin: 0 1 0 0;
+        padding: 0;
     }
     #new-key-card Input {
         margin: 0 0 1 0;
@@ -119,6 +133,12 @@ class MainScreen(Screen):
     }
     #new-key-btns Button {
         margin: 0 1;
+    }
+    #nk-input-container {
+        height: auto;
+    }
+    #nk-input-container Horizontal {
+        height: auto;
     }
     """
 
@@ -145,8 +165,13 @@ class MainScreen(Screen):
         with Vertical(id="new-key-overlay"):
             with Vertical(id="new-key-card"):
                 yield Static("✨ New Key", classes="dialog-title")
+                with RadioSet(id="nk-type-radios"):
+                    yield RadioButton("String", value=True, id="nk-rb-string")
+                    yield RadioButton("List", id="nk-rb-list")
+                    yield RadioButton("Hash", id="nk-rb-hash")
+                    yield RadioButton("Set", id="nk-rb-set")
+                    yield RadioButton("ZSet", id="nk-rb-zset")
                 yield Input(placeholder="Key name", id="nk-name")
-                yield Input(placeholder="Value", id="nk-value")
                 with Horizontal(id="new-key-btns"):
                     yield Button("Cancel", variant="default", id="nk-cancel")
                     yield Button("Create", variant="primary", id="nk-create")
@@ -157,6 +182,7 @@ class MainScreen(Screen):
         client = self._get_client()
         db_select = self.query_one("#db-select", Select)
         db_select.value = str(client.db)
+
         self._load_keys()
         self._load_server_info()
 
@@ -196,11 +222,32 @@ class MainScreen(Screen):
         except Exception:
             return 2000
 
-    def _load_keys(self, pattern: str = "*"):
+    def _load_keys(self, pattern: str | None = None):
+        if pattern is not None:
+            self._current_pattern = pattern
+        elif not hasattr(self, "_current_pattern"):
+            self._current_pattern = "*"
+
         client = self._get_client()
-        next_cursor, keys = client.scan_keys_paginated(cursor=0, pattern=pattern, count=self._get_page_limit())
+        next_cursor, keys = client.scan_keys_paginated(
+            cursor=0, pattern=self._current_pattern, count=self._get_page_limit()
+        )
+
+        # Overwrite with virtual keys if they match the pattern
+        import fnmatch
+
+        for v_key in getattr(self, "_virtual_keys", {}):
+            if fnmatch.fnmatch(v_key, self._current_pattern):
+                if v_key not in keys:
+                    keys.append(v_key)
+
         # Get types for all keys (optimized batch)
         key_types = client.get_types(keys)
+
+        for v_key, v_type in getattr(self, "_virtual_keys", {}).items():
+            if v_key in keys and key_types.get(v_key, "none") == "none":
+                key_types[v_key] = v_type
+
         tree = self.query_one("#key-tree", KeyTree)
         tree.load_keys(keys, key_types, next_cursor=next_cursor)
         self._load_db_options()
@@ -320,6 +367,10 @@ class MainScreen(Screen):
         if event.input.id == "limit-box":
             self._load_keys()
             self.notify(f"Keys reloaded (limit: {self._get_page_limit()})", timeout=2)
+        elif event.input.id == "search-box":
+            pattern = f"*{event.value}*" if event.value else "*"
+            self._load_keys(pattern=pattern)
+            self.notify(f"Search matching {pattern}", timeout=2)
 
     async def on_key_tree_load_more_clicked(self, event: KeyTree.LoadMoreClicked) -> None:
         """Fetch the next page of keys and append to the tree."""
@@ -328,13 +379,10 @@ class MainScreen(Screen):
             return
 
         client = self._get_client()
-        # Fetch unconditionally matching pattern to support progressive load
-        # Wait, redis matching is server-side, our search is client-side filter
-        # For simplicity, we just fetch next page of entire keyspace and let filter apply locally
+
+        actual_pattern = getattr(self, "_current_pattern", "*")
         next_cursor, keys = client.scan_keys_paginated(
-            cursor=tree._next_cursor,
-            pattern="*",
-            count=self._get_page_limit()
+            cursor=tree._next_cursor, pattern=actual_pattern, count=self._get_page_limit()
         )
 
         if keys:
@@ -350,6 +398,11 @@ class MainScreen(Screen):
         client = self._get_client()
         key = event.key
         key_type = client.get_type(key)
+
+        if key_type == "none" and hasattr(self, "_virtual_keys"):
+            # Check if it was a virtual key that hasn't been written to Redis yet
+            if key in self._virtual_keys:
+                key_type = self._virtual_keys[key]
 
         # Show value
         viewer = self.query_one("#value-viewer", ValueViewer)
@@ -391,28 +444,67 @@ class MainScreen(Screen):
 
     async def on_value_viewer_member_added(self, event: ValueViewer.MemberAdded) -> None:
         client = self._get_client()
-        if event.value_type == "list":
-            client.list_push(event.key, event.data)
-        elif event.value_type == "hash":
-            field, value = event.data
-            client.hash_set(event.key, field, value)
-        elif event.value_type == "set":
-            client.set_add(event.key, event.data)
-        elif event.value_type == "zset":
-            member, score = event.data
-            client.zset_add(event.key, member, score)
-        # Refresh the view
-        key_type = client.get_type(event.key)
-        data = self._get_value(event.key, key_type)
-        viewer = self.query_one("#value-viewer", ValueViewer)
-        await viewer.show_value(event.key, key_type, data)
-        self.notify(f"➕ Added to {event.key}", timeout=2)
+        try:
+            if event.value_type == "list":
+                idx, val = event.data
+                if idx is not None:
+                    client.list_set(event.key, idx, val)
+                else:
+                    client.list_push(event.key, val)
+            elif event.value_type == "hash":
+                field, value = event.data
+                client.hash_set(event.key, field, value)
+            elif event.value_type == "set":
+                client.set_add(event.key, event.data)
+            elif event.value_type == "zset":
+                member, score = event.data
+                client.zset_add(event.key, member, score)
+
+            # Refresh the view
+            key_type = client.get_type(event.key)
+            data = self._get_value(event.key, key_type)
+            viewer = self.query_one("#value-viewer", ValueViewer)
+            await viewer.show_value(event.key, key_type, data)
+            self.notify(f"✅ Saved to {event.key}", timeout=2)
+        except Exception as e:
+            self.notify(f"⚠️ Edit failed: {e}", severity="error", timeout=4)
+
+    async def on_value_viewer_member_deleted(self, event: ValueViewer.MemberDeleted) -> None:
+        client = self._get_client()
+        try:
+            if event.value_type == "list":
+                # For Redis, list_remove removes by value. Textual passes the actual string value.
+                client.list_remove(event.key, event.data, 1)
+            elif event.value_type == "hash":
+                client.hash_delete(event.key, event.data)
+            elif event.value_type == "set":
+                client.set_remove(event.key, event.data)
+            elif event.value_type == "zset":
+                client.zset_remove(event.key, event.data)
+
+            # Refresh the view
+            key_type = client.get_type(event.key)
+            if key_type == "none":
+                # Deleted last element, key might be gone!
+                self.query_one("#value-viewer", ValueViewer).show_empty()
+                self._load_keys()
+            else:
+                data = self._get_value(event.key, key_type)
+                viewer = self.query_one("#value-viewer", ValueViewer)
+                await viewer.show_value(event.key, key_type, data)
+            self.notify(f"🗑️ Deleted from {event.key}", timeout=2)
+        except Exception as e:
+            self.notify(f"⚠️ Delete failed: {e}", severity="error", timeout=4)
 
     # ── Key Detail Messages ──────────────────────────────────────
 
     async def on_key_detail_key_deleted(self, event: KeyDetail.KeyDeleted) -> None:
         client = self._get_client()
         client.delete_key(event.key)
+
+        if hasattr(self, "_virtual_keys") and event.key in self._virtual_keys:
+            del self._virtual_keys[event.key]
+
         self._load_keys()
         viewer = self.query_one("#value-viewer", ValueViewer)
         viewer.show_empty()
@@ -433,25 +525,61 @@ class MainScreen(Screen):
 
         # Auto-refresh if write command
         cmd_upper = event.command.strip().split()[0].upper() if event.command.strip() else ""
-        write_cmds = {"SET", "DEL", "HSET", "HDEL", "LPUSH", "RPUSH", "SADD", "ZADD", "SREM", "ZREM", "RENAME", "EXPIRE", "PERSIST", "FLUSHDB"}
+        write_cmds = {
+            "SET",
+            "DEL",
+            "HSET",
+            "HDEL",
+            "LPUSH",
+            "RPUSH",
+            "SADD",
+            "ZADD",
+            "SREM",
+            "ZREM",
+            "RENAME",
+            "EXPIRE",
+            "PERSIST",
+            "FLUSHDB",
+        }
         if cmd_upper in write_cmds:
             self._load_keys()
 
     # ── New Key Dialog ───────────────────────────────────────────
 
+    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
+        pass
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "nk-cancel":
             self.query_one("#new-key-overlay").remove_class("visible")
         elif event.button.id == "nk-create":
+            radio_set = self.query_one("#nk-type-radios", RadioSet)
             name_input = self.query_one("#nk-name", Input)
-            value_input = self.query_one("#nk-value", Input)
+
+            # map radio button ID to key_type
+            rb_id_map = {
+                "nk-rb-string": "string",
+                "nk-rb-list": "list",
+                "nk-rb-hash": "hash",
+                "nk-rb-set": "set",
+                "nk-rb-zset": "zset",
+            }
+
+            pressed_id = radio_set.pressed_button.id if radio_set.pressed_button else "nk-rb-string"
+            key_type = rb_id_map.get(pressed_id, "string")
+
             name = name_input.value.strip()
-            value = value_input.value
+
             if name:
-                client = self._get_client()
-                client.set_string(name, value)
+                # We do not immediately store empty values into Redis because Redis automatically
+                # deletes Hash/Set/List/Zset that are completely empty.
+                # Instead, we create a "virtual key" that exists locally in the UI.
+                # It will physically save to Redis once you add the first value in the right panel.
+                if not hasattr(self, "_virtual_keys"):
+                    self._virtual_keys = {}
+                self._virtual_keys[name] = key_type
+
                 name_input.value = ""
-                value_input.value = ""
                 self.query_one("#new-key-overlay").remove_class("visible")
                 self._load_keys()
-                self.notify(f"✨ Created key: {name}", timeout=2)
+                self.notify(f"✨ Created virtual {key_type} key: {name}", timeout=2)

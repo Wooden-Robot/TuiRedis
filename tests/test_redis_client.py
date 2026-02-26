@@ -20,7 +20,7 @@ class TestRedisClient(unittest.TestCase):
     def test_client_property_connected(self):
         self.assertEqual(self.client.client, self.mock_redis)
 
-    @patch('tuiredis.redis_client.redis.Redis')
+    @patch("tuiredis.redis_client.redis.Redis")
     def test_connect_success(self, mock_redis_class):
         mock_instance = mock_redis_class.return_value
         self.client._client = None
@@ -32,7 +32,7 @@ class TestRedisClient(unittest.TestCase):
         )
         mock_instance.ping.assert_called_once()
 
-    @patch('tuiredis.redis_client.redis.Redis')
+    @patch("tuiredis.redis_client.redis.Redis")
     def test_connect_failure(self, mock_redis_class):
         mock_instance = mock_redis_class.return_value
         mock_instance.ping.side_effect = redis.ConnectionError()
@@ -70,7 +70,7 @@ class TestRedisClient(unittest.TestCase):
         self.mock_redis.ping.side_effect = redis.ConnectionError()
         self.assertFalse(self.client.is_connected)
 
-    @patch('tuiredis.redis_client.redis.Redis')
+    @patch("tuiredis.redis_client.redis.Redis")
     def test_connect_with_ssh(self, mock_redis_class):
         # Setup SSH Client
         client = RedisClient(host="remote", port=6379, ssh_host="jump", ssh_user="root")
@@ -83,22 +83,21 @@ class TestRedisClient(unittest.TestCase):
 
         # Patch __import__ to return our mock for sshtunnel
         original_import = __import__
+
         def mock_import(name, *args, **kwargs):
-            if name == 'sshtunnel':
+            if name == "sshtunnel":
                 mock_module = MagicMock()
                 mock_module.SSHTunnelForwarder = mock_ssh_class
                 return mock_module
             return original_import(name, *args, **kwargs)
 
-        with patch('builtins.__import__', side_effect=mock_import):
+        with patch("builtins.__import__", side_effect=mock_import):
             result, msg = client.connect()
         self.assertTrue(result)
         self.assertEqual(msg, "")
 
         mock_ssh_class.assert_called_once_with(
-            ssh_address_or_host=("jump", 22),
-            ssh_username="root",
-            remote_bind_address=("remote", 6379)
+            ssh_address_or_host=("jump", 22), ssh_username="root", remote_bind_address=("remote", 6379)
         )
         mock_ssh_instance.start.assert_called_once()
 
@@ -108,7 +107,7 @@ class TestRedisClient(unittest.TestCase):
         )
         mock_redis_instance.ping.assert_called_once()
 
-    @patch('tuiredis.redis_client.redis.Redis')
+    @patch("tuiredis.redis_client.redis.Redis")
     def test_connect_ssh_failure(self, mock_redis_class):
         client = RedisClient(host="remote", port=6379, ssh_host="jump", ssh_user="root")
 
@@ -117,14 +116,15 @@ class TestRedisClient(unittest.TestCase):
         mock_ssh_instance.start.side_effect = Exception("SSH Failed")
 
         original_import = __import__
+
         def mock_import(name, *args, **kwargs):
-            if name == 'sshtunnel':
+            if name == "sshtunnel":
                 mock_module = MagicMock()
                 mock_module.SSHTunnelForwarder = mock_ssh_class
                 return mock_module
             return original_import(name, *args, **kwargs)
 
-        with patch('builtins.__import__', side_effect=mock_import):
+        with patch("builtins.__import__", side_effect=mock_import):
             result, msg = client.connect()
 
         self.assertFalse(result)
@@ -146,10 +146,7 @@ class TestRedisClient(unittest.TestCase):
         self.assertEqual(self.client.db, 1)
 
     def test_scan_keys(self):
-        self.mock_redis.scan.side_effect = [
-            (1, ["key1", "key2"]),
-            (0, ["key3"])
-        ]
+        self.mock_redis.scan.side_effect = [(1, ["key1", "key2"]), (0, ["key3"])]
         result = self.client.scan_keys(pattern="test*", count=100)
         self.assertEqual(result, sorted(["key1", "key2", "key3"]))
         self.assertEqual(self.mock_redis.scan.call_count, 2)
@@ -301,11 +298,7 @@ class TestRedisClient(unittest.TestCase):
         self.assertEqual(self.client.get_server_info(), {"redis_version": "7.0.0"})
 
     def test_get_keyspace_info(self):
-        self.mock_redis.info.return_value = {
-            "db0": {"keys": 10},
-            "db1": {"keys": 5},
-            "dbx": "invalid"
-        }
+        self.mock_redis.info.return_value = {"db0": {"keys": 10}, "db1": {"keys": 5}, "dbx": "invalid"}
         self.assertEqual(self.client.get_keyspace_info(), {0: 10, 1: 5})
 
     def test_get_keyspace_info_error(self):
@@ -350,5 +343,6 @@ class TestRedisClient(unittest.TestCase):
         self.client.password = None
         self.assertEqual(self.client.connection_label, "localhost:6379/db1")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

@@ -10,13 +10,16 @@ from tuiredis.screens.connect import ConnectScreen
 @pytest.fixture
 def mock_redis_client():
     from tuiredis.redis_client import RedisClient
-    with patch.object(RedisClient, 'connect', return_value=(True, "")):
-        with patch.object(RedisClient, 'get_server_info', return_value={"redis_version": "7.0.0"}):
-            with patch.object(RedisClient, 'scan_keys_paginated', return_value=(0, [])):
-                with patch.object(RedisClient, 'get_keyspace_info', return_value={0: 10, 1: 5}):
-                    with patch.object(RedisClient, 'get_types', return_value={}):
-                        with patch('tuiredis.screens.connect.load_connections', return_value=[]), \
-                             patch('tuiredis.screens.connect.save_connection'):
+
+    with patch.object(RedisClient, "connect", return_value=(True, "")):
+        with patch.object(RedisClient, "get_server_info", return_value={"redis_version": "7.0.0"}):
+            with patch.object(RedisClient, "scan_keys_paginated", return_value=(0, [])):
+                with patch.object(RedisClient, "get_keyspace_info", return_value={0: 10, 1: 5}):
+                    with patch.object(RedisClient, "get_types", return_value={}):
+                        with (
+                            patch("tuiredis.screens.connect.load_connections", return_value=[]),
+                            patch("tuiredis.screens.connect.save_connection"),
+                        ):
                             yield
 
 

@@ -40,7 +40,10 @@ class TRedisApp(App):
     ):
         super().__init__()
         self.redis_client = RedisClient(
-            host=host, port=port, password=password, db=db,
+            host=host,
+            port=port,
+            password=password,
+            db=db,
             ssh_host=ssh_host,
             ssh_port=ssh_port,
             ssh_user=ssh_user,

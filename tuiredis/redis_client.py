@@ -50,10 +50,12 @@ class RedisClient:
             if self.ssh_host:
                 # Workaround for sshtunnel <=0.4.0 breaking on paramiko >= 3.4.0
                 import paramiko
+
                 if not hasattr(paramiko, "DSSKey"):
                     paramiko.DSSKey = None
 
                 from sshtunnel import SSHTunnelForwarder
+
                 kwargs = {
                     "ssh_address_or_host": (self.ssh_host, self.ssh_port),
                     "ssh_username": self.ssh_user,
@@ -141,7 +143,9 @@ class RedisClient:
         # Redis SCAN COUNT is a hint; often returns fewer keys or even 0 keys per call.
         # Loop until we accumulate the requested amount or finish the scan.
         while len(result_keys) < count:
-            request_count = max(count - len(result_keys), 10)  # slightly higher minimum to avoid spinning on small counts
+            request_count = max(
+                count - len(result_keys), 10
+            )  # slightly higher minimum to avoid spinning on small counts
             next_cursor, batch = self.client.scan(cursor=next_cursor, match=pattern, count=request_count)
             result_keys.extend(batch)
             if next_cursor == 0:

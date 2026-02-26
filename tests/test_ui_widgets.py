@@ -20,14 +20,21 @@ class DummyApp(App):
         yield KeyDetail()
         yield ValueViewer()
 
+
 @pytest.fixture
 def mock_client():
     client = MagicMock(spec=RedisClient)
     client.connection_label = "localhost:6379"
-    client.get_server_info.return_value = {"redis_version": "7.0.0", "os": "Linux", "used_memory_human": "1M", "db0": 100}
+    client.get_server_info.return_value = {
+        "redis_version": "7.0.0",
+        "os": "Linux",
+        "used_memory_human": "1M",
+        "db0": 100,
+    }
     client.get_db_size.return_value = 100
     client.get_keyspace_info.return_value = {0: 100}
     return client
+
 
 @pytest.mark.asyncio
 async def test_server_info(mock_client):
@@ -39,6 +46,7 @@ async def test_server_info(mock_client):
         # Check text render output
         text = str(server_info.query_one("#si-text").render())
         assert "7.0.0" in text
+
 
 @pytest.mark.asyncio
 async def test_command_input():
@@ -68,12 +76,15 @@ async def test_command_input():
         cmd_input.write_result("GET mykey", "(nil)")
         await pilot.pause(0.1)
 
+
 @pytest.mark.asyncio
 async def test_key_tree():
     app = DummyApp()
     async with app.run_test() as pilot:
         tree = app.query_one(KeyTree)
-        tree.load_keys(keys=["user:1", "user:2", "config"], key_types={"user:1": "string", "user:2": "hash", "config": "list"})
+        tree.load_keys(
+            keys=["user:1", "user:2", "config"], key_types={"user:1": "string", "user:2": "hash", "config": "list"}
+        )
         await pilot.pause(0.1)
 
         # 'config' comes before 'user' alphabetically
@@ -92,6 +103,7 @@ async def test_key_tree():
         assert "📋 config" in children_labels
         assert "📁 user (3)" not in children_labels
 
+
 @pytest.mark.asyncio
 async def test_key_detail(mock_client):
     app = DummyApp()
@@ -107,6 +119,7 @@ async def test_key_detail(mock_client):
         assert "100s" in text
         assert "1.0 KB" in text
 
+
 @pytest.mark.asyncio
 async def test_value_viewer_string():
     app = DummyApp()
@@ -114,6 +127,7 @@ async def test_value_viewer_string():
         viewer = app.query_one(ValueViewer)
         await viewer.show_value("mykey", "string", "my string value")
         await pilot.pause(0.1)
+
 
 @pytest.mark.asyncio
 async def test_value_viewer_json():
@@ -123,6 +137,7 @@ async def test_value_viewer_json():
         await viewer.show_value("mykey", "string", '{"key": "value"}')
         await pilot.pause(0.1)
 
+
 @pytest.mark.asyncio
 async def test_value_viewer_list():
     app = DummyApp()
@@ -130,6 +145,7 @@ async def test_value_viewer_list():
         viewer = app.query_one(ValueViewer)
         await viewer.show_value("mykey", "list", ["item1", "item2"])
         await pilot.pause(0.1)
+
 
 @pytest.mark.asyncio
 async def test_value_viewer_hash():
@@ -139,6 +155,7 @@ async def test_value_viewer_hash():
         await viewer.show_value("mykey", "hash", {"f1": "v1"})
         await pilot.pause(0.1)
 
+
 @pytest.mark.asyncio
 async def test_value_viewer_set():
     app = DummyApp()
@@ -146,6 +163,7 @@ async def test_value_viewer_set():
         viewer = app.query_one(ValueViewer)
         await viewer.show_value("mykey", "set", {"member1"})
         await pilot.pause(0.1)
+
 
 @pytest.mark.asyncio
 async def test_value_viewer_zset():

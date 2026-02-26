@@ -286,7 +286,6 @@ class ConnectScreen(Screen):
             self._last_click_id = pid
             self._last_click_time = now
 
-
     def _clear_form(self) -> None:
         """Clear the form for a new connection."""
         self.current_profile_id = None
@@ -333,7 +332,6 @@ class ConnectScreen(Screen):
             else:
                 ssh_card.remove_class("visible")
 
-
     def _build_profile_from_inputs(self) -> ConnectionProfile:
         name = self.query_one("#profile-name-input", Input).value.strip() or ""
         host = self.query_one("#host-input", Input).value.strip() or "127.0.0.1"
@@ -378,7 +376,7 @@ class ConnectScreen(Screen):
             "ssh_port": ssh_port,
             "ssh_user": ssh_user,
             "ssh_password": ssh_password,
-            "ssh_private_key": ssh_private_key
+            "ssh_private_key": ssh_private_key,
         }
 
         if self.current_profile_id:
@@ -386,16 +384,17 @@ class ConnectScreen(Screen):
 
         return profile
 
-
     async def _do_save(self) -> None:
         profile = self._build_profile_from_inputs()
         connections = save_connection(profile)
         # Find the saved profile to get its ID in case it was newly generated or deduplicated
         for p in connections:
-            if (p.get("host") == profile.get("host") and
-                p.get("port") == profile.get("port") and
-                p.get("db") == profile.get("db") and
-                p.get("name") == profile.get("name")):
+            if (
+                p.get("host") == profile.get("host")
+                and p.get("port") == profile.get("port")
+                and p.get("db") == profile.get("db")
+                and p.get("name") == profile.get("name")
+            ):
                 self.current_profile_id = p.get("id")
                 break
 
@@ -413,7 +412,7 @@ class ConnectScreen(Screen):
         error_label = self.query_one("#connect-error", Static)
         error_label.update("🔗 Connecting (this may take a moment)...")
         error_label.add_class("visible")
-        self.app.refresh() # Force UI update immediately
+        self.app.refresh()  # Force UI update immediately
 
         from tuiredis.redis_client import RedisClient
 
@@ -426,7 +425,7 @@ class ConnectScreen(Screen):
             ssh_port=profile.get("ssh_port", 22),
             ssh_user=profile.get("ssh_user"),
             ssh_password=profile.get("ssh_password"),
-            ssh_private_key=profile.get("ssh_private_key")
+            ssh_private_key=profile.get("ssh_private_key"),
         )
 
         success, err_msg = client.connect()
@@ -438,9 +437,11 @@ class ConnectScreen(Screen):
             connections = save_connection(profile)
             if not self.current_profile_id:
                 for p in connections:
-                    if (p.get("host") == profile.get("host") and
-                        p.get("port") == profile.get("port") and
-                        p.get("db") == profile.get("db")):
+                    if (
+                        p.get("host") == profile.get("host")
+                        and p.get("port") == profile.get("port")
+                        and p.get("db") == profile.get("db")
+                    ):
                         self.current_profile_id = p.get("id")
                         break
                 await self._refresh_history()

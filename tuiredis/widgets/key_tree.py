@@ -21,6 +21,7 @@ class KeyTree(Tree):
 
     class LoadMoreClicked(Message):
         """Emitted when the Load More node is selected."""
+
         pass
 
     # Type icons

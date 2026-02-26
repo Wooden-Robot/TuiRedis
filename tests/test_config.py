@@ -62,7 +62,7 @@ def test_save_connection_update(tmp_path):
         profile_update["name"] = "DB 1 Updated"
         profile_update["port"] = 6380
 
-        res2 = save_connection(profile_update) # type: ignore
+        res2 = save_connection(profile_update)  # type: ignore
 
         assert len(res2) == 1
         assert res2[0]["id"] == conn_id
@@ -88,8 +88,8 @@ def test_save_multiple_connections(tmp_path):
 
 def test_delete_connection(tmp_path):
     with patch("tuiredis.config.Path.home", return_value=tmp_path):
-        save_connection({"name": "c1", "host": "h1", "port": 1}) # type: ignore
-        res = save_connection({"name": "c2", "host": "h2", "port": 2}) # type: ignore
+        save_connection({"name": "c1", "host": "h1", "port": 1})  # type: ignore
+        res = save_connection({"name": "c2", "host": "h2", "port": 2})  # type: ignore
 
         id_to_delete = res[0]["id"]
 

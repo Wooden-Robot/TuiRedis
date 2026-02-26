@@ -47,9 +47,46 @@ class ValueViewer(Widget):
     ValueViewer Button {
         margin: 0 1;
     }
+    ValueViewer #vv-table {
+        height: 60%;
+        overflow-y: scroll;
+    }
     ValueViewer #vv-add-row {
         height: auto;
-        padding: 0 1;
+        min-height: 5;
+        border-top: tall $surface-lighten-2;
+        padding: 1;
+        align: right middle;
+    }
+    ValueViewer #vv-add-row Horizontal {
+        height: auto;
+    }
+    ValueViewer #vv-add-row Input {
+        width: 1fr;
+        margin-bottom: 1;
+    }
+    ValueViewer #vv-add-row .vv-add-buttons {
+        height: 3;
+        align: right middle;
+    }
+    ValueViewer #vv-add-row .vv-add-buttons Button {
+        margin-left: 1;
+    }
+    ValueViewer #vv-hash-editor {
+        height: 40%;
+        border-top: tall $surface-lighten-2;
+        padding: 1;
+    }
+    ValueViewer #vv-hash-controls {
+        height: auto;
+    }
+    ValueViewer #vv-hash-controls Input {
+        width: 1fr;
+        margin-bottom: 0;
+    }
+    ValueViewer #vv-hash-val {
+        height: 1fr;
+        margin: 1 0;
     }
     """
 
@@ -95,11 +132,7 @@ class ValueViewer(Widget):
         self._current_key = None
         self._current_type = None
         self.query("*").remove()
-        self.mount(
-            Vertical(
-                Static("Select a key to view its value", classes="vv-empty", id="vv-placeholder")
-            )
-        )
+        self.mount(Vertical(Static("Select a key to view its value", classes="vv-empty", id="vv-placeholder")))
 
     async def show_value(self, key: str, value_type: str, data):
         """Display the value for a given key."""
@@ -149,55 +182,79 @@ class ValueViewer(Widget):
             container = Vertical(header, body, actions)
 
         elif value_type == "list":
-            table = DataTable(id="vv-table")
+            table = DataTable(id="vv-table", cursor_type="row")
             table.add_columns("Index", "Value")
             if data:
                 for i, val in enumerate(data):
                     table.add_row(str(i), str(val), key=str(i))
-            add_row = Horizontal(
-                Input(placeholder="New value...", id="vv-add-input"),
-                Button("➕ Add", variant="success", id="vv-add-list"),
+            add_row = Vertical(
+                Horizontal(
+                    Input(placeholder="Index (append if empty)", id="vv-list-idx"),
+                    Input(placeholder="Value", id="vv-list-val"),
+                ),
+                Horizontal(
+                    Button("Save/Add", variant="success", id="vv-save-list"),
+                    Button("Delete", variant="error", id="vv-delete-list"),
+                    classes="vv-add-buttons",
+                ),
                 id="vv-add-row",
             )
             container = Vertical(header, table, add_row)
 
         elif value_type == "hash":
-            table = DataTable(id="vv-table")
+            table = DataTable(id="vv-table", cursor_type="row")
             table.add_columns("Field", "Value")
             if data:
                 for field, val in sorted(data.items()):
                     table.add_row(str(field), str(val), key=str(field))
-            add_row = Horizontal(
-                Input(placeholder="Field", id="vv-add-field"),
-                Input(placeholder="Value", id="vv-add-value"),
-                Button("➕ Add", variant="success", id="vv-add-hash"),
-                id="vv-add-row",
+
+            controls = Vertical(
+                Horizontal(Input(placeholder="Field", id="vv-hash-fld"), id="vv-hash-controls"),
+                TextArea(id="vv-hash-val", language=None),
+                Horizontal(
+                    Button("Save/Add", variant="success", id="vv-save-hash"),
+                    Button("Delete", variant="error", id="vv-delete-hash"),
+                    classes="vv-add-buttons",
+                ),
+                id="vv-hash-editor",
             )
-            container = Vertical(header, table, add_row)
+            container = Vertical(header, table, controls)
 
         elif value_type == "set":
-            table = DataTable(id="vv-table")
+            table = DataTable(id="vv-table", cursor_type="row")
             table.add_columns("#", "Member")
             if data:
                 for i, member in enumerate(sorted(data), 1):
                     table.add_row(str(i), str(member), key=str(member))
-            add_row = Horizontal(
-                Input(placeholder="New member...", id="vv-add-input"),
-                Button("➕ Add", variant="success", id="vv-add-set"),
+            add_row = Vertical(
+                Horizontal(
+                    Input(placeholder="Member", id="vv-set-val"),
+                ),
+                Horizontal(
+                    Button("Add", variant="success", id="vv-save-set"),
+                    Button("Delete", variant="error", id="vv-delete-set"),
+                    classes="vv-add-buttons",
+                ),
                 id="vv-add-row",
             )
             container = Vertical(header, table, add_row)
 
         elif value_type == "zset":
-            table = DataTable(id="vv-table")
+            table = DataTable(id="vv-table", cursor_type="row")
             table.add_columns("#", "Member", "Score")
             if data:
                 for i, (member, score) in enumerate(data, 1):
                     table.add_row(str(i), str(member), str(score), key=str(member))
-            add_row = Horizontal(
-                Input(placeholder="Member", id="vv-add-field"),
-                Input(placeholder="Score", id="vv-add-value"),
-                Button("➕ Add", variant="success", id="vv-add-zset"),
+            add_row = Vertical(
+                Horizontal(
+                    Input(placeholder="Member", id="vv-zset-mem"),
+                    Input(placeholder="Score", id="vv-zset-score"),
+                ),
+                Horizontal(
+                    Button("Save/Add", variant="success", id="vv-save-zset"),
+                    Button("Delete", variant="error", id="vv-delete-zset"),
+                    classes="vv-add-buttons",
+                ),
                 id="vv-add-row",
             )
             container = Vertical(header, table, add_row)
@@ -238,54 +295,93 @@ class ValueViewer(Widget):
 
         if btn_id == "vv-save-string":
             textarea = self.query_one("#vv-text", TextArea)
-            self.post_message(
-                self.ValueSaved(self._current_key, "string", textarea.text)
-            )
+            self.post_message(self.ValueSaved(self._current_key, "string", textarea.text))
 
-        elif btn_id == "vv-add-list":
-            inp = self.query_one("#vv-add-input", Input)
-            if inp.value.strip():
-                self.post_message(
-                    self.MemberAdded(self._current_key, "list", inp.value.strip())
-                )
-                inp.value = ""
+        elif btn_id == "vv-save-list":
+            idx_inp = self.query_one("#vv-list-idx", Input)
+            val_inp = self.query_one("#vv-list-val", Input)
+            if val_inp.value.strip():
+                idx_val = idx_inp.value.strip()
+                idx = int(idx_val) if idx_val.isdigit() or (idx_val.startswith("-") and idx_val[1:].isdigit()) else None
+                self.post_message(self.MemberAdded(self._current_key, "list", (idx, val_inp.value.strip())))
+                val_inp.value = ""
+                idx_inp.value = ""
 
-        elif btn_id == "vv-add-hash":
-            field_inp = self.query_one("#vv-add-field", Input)
-            value_inp = self.query_one("#vv-add-value", Input)
+        elif btn_id == "vv-delete-list":
+            val_inp = self.query_one("#vv-list-val", Input)
+            if val_inp.value.strip():
+                self.post_message(self.MemberDeleted(self._current_key, "list", val_inp.value.strip()))
+                self.query_one("#vv-list-idx", Input).value = ""
+                val_inp.value = ""
+
+        elif btn_id == "vv-save-hash":
+            field_inp = self.query_one("#vv-hash-fld", Input)
+            value_inp = self.query_one("#vv-hash-val", TextArea)
             if field_inp.value.strip():
                 self.post_message(
-                    self.MemberAdded(
-                        self._current_key,
-                        "hash",
-                        (field_inp.value.strip(), value_inp.value),
-                    )
+                    self.MemberAdded(self._current_key, "hash", (field_inp.value.strip(), value_inp.text))
                 )
                 field_inp.value = ""
-                value_inp.value = ""
+                value_inp.text = ""
 
-        elif btn_id == "vv-add-set":
-            inp = self.query_one("#vv-add-input", Input)
+        elif btn_id == "vv-delete-hash":
+            field_inp = self.query_one("#vv-hash-fld", Input)
+            if field_inp.value.strip():
+                self.post_message(self.MemberDeleted(self._current_key, "hash", field_inp.value.strip()))
+                field_inp.value = ""
+                self.query_one("#vv-hash-val", TextArea).text = ""
+
+        elif btn_id == "vv-save-set":
+            inp = self.query_one("#vv-set-val", Input)
             if inp.value.strip():
-                self.post_message(
-                    self.MemberAdded(self._current_key, "set", inp.value.strip())
-                )
+                self.post_message(self.MemberAdded(self._current_key, "set", inp.value.strip()))
                 inp.value = ""
 
-        elif btn_id == "vv-add-zset":
-            field_inp = self.query_one("#vv-add-field", Input)
-            score_inp = self.query_one("#vv-add-value", Input)
+        elif btn_id == "vv-delete-set":
+            inp = self.query_one("#vv-set-val", Input)
+            if inp.value.strip():
+                self.post_message(self.MemberDeleted(self._current_key, "set", inp.value.strip()))
+                inp.value = ""
+
+        elif btn_id == "vv-save-zset":
+            field_inp = self.query_one("#vv-zset-mem", Input)
+            score_inp = self.query_one("#vv-zset-score", Input)
             if field_inp.value.strip():
                 try:
                     score = float(score_inp.value)
                 except ValueError:
                     score = 0.0
-                self.post_message(
-                    self.MemberAdded(
-                        self._current_key,
-                        "zset",
-                        (field_inp.value.strip(), score),
-                    )
-                )
+                self.post_message(self.MemberAdded(self._current_key, "zset", (field_inp.value.strip(), score)))
                 field_inp.value = ""
                 score_inp.value = ""
+
+        elif btn_id == "vv-delete-zset":
+            field_inp = self.query_one("#vv-zset-mem", Input)
+            if field_inp.value.strip():
+                self.post_message(self.MemberDeleted(self._current_key, "zset", field_inp.value.strip()))
+                field_inp.value = ""
+                self.query_one("#vv-zset-score", Input).value = ""
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Populate the inputs when a row is clicked."""
+        if not self._current_type:
+            return
+
+        row_key = event.row_key.value
+        table = getattr(event, "data_table", None)
+        if not table:
+            return
+
+        row_data = table.get_row(row_key)
+
+        if self._current_type == "list":
+            self.query_one("#vv-list-idx", Input).value = str(row_data[0])
+            self.query_one("#vv-list-val", Input).value = str(row_data[1])
+        elif self._current_type == "hash":
+            self.query_one("#vv-hash-fld", Input).value = str(row_data[0])
+            self.query_one("#vv-hash-val", TextArea).text = str(row_data[1])
+        elif self._current_type == "set":
+            self.query_one("#vv-set-val", Input).value = str(row_data[1])
+        elif self._current_type == "zset":
+            self.query_one("#vv-zset-mem", Input).value = str(row_data[1])
+            self.query_one("#vv-zset-score", Input).value = str(row_data[2])

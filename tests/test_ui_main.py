@@ -34,20 +34,23 @@ def mock_redis_client():
     client.get_zset.return_value = [("z1", 1.0)]
 
     # Apply patches for connection management functions
-    with patch('tuiredis.screens.connect.load_connections', return_value=[]), \
-         patch('tuiredis.screens.connect.save_connection'):
+    with (
+        patch("tuiredis.screens.connect.load_connections", return_value=[]),
+        patch("tuiredis.screens.connect.save_connection"),
+    ):
         yield client
 
 
 @pytest.mark.asyncio
 async def test_app_auto_connect(mock_redis_client):
     """Test auto-connect bypassing the connect screen."""
-    with patch.object(RedisClient, 'connect', return_value=(True, "")):
-        with patch.object(RedisClient, 'get_server_info', mock_redis_client.get_server_info), \
-             patch.object(RedisClient, 'get_keyspace_info', mock_redis_client.get_keyspace_info), \
-             patch.object(RedisClient, 'scan_keys_paginated', mock_redis_client.scan_keys_paginated), \
-             patch.object(RedisClient, 'get_types', mock_redis_client.get_types):
-
+    with patch.object(RedisClient, "connect", return_value=(True, "")):
+        with (
+            patch.object(RedisClient, "get_server_info", mock_redis_client.get_server_info),
+            patch.object(RedisClient, "get_keyspace_info", mock_redis_client.get_keyspace_info),
+            patch.object(RedisClient, "scan_keys_paginated", mock_redis_client.scan_keys_paginated),
+            patch.object(RedisClient, "get_types", mock_redis_client.get_types),
+        ):
             app = TRedisApp(auto_connect=True)
             async with app.run_test(size=(120, 40)) as pilot:
                 assert isinstance(app.screen, MainScreen)
@@ -110,6 +113,7 @@ async def test_main_screen_interactions(mock_redis_client):
         detail.post_message(KeyDetail.TtlSet("user:1", 3600))
         await pilot.pause(0.1)
         mock_redis_client.set_ttl.assert_called_with("user:1", 3600)
+
 
 @pytest.mark.asyncio
 async def test_main_screen_value_viewer_events(mock_redis_client):
