@@ -185,12 +185,12 @@ class ConnectScreen(Screen):
                 with Vertical(id="connect-card"):
                     with VerticalScroll(id="form-scroll"):
                         yield Static(
-                            r"""[bold #DC382D]
-  _____      _ ____          _ _
- |_   _|   _(_)  _ \ ___  __| (_)___
-   | || | | | | |_) / _ \/ _` | / __|
-   | || |_| | |  _ <  __/ (_| | \__ \
-   |_| \__,_|_|_| \_\___|\__,_|_|___/[/]""",
+                            "[bold #DC382D]\n"
+                            "  _____      _ ____          _ _     \n"
+                            " |_   _|   _(_)  _ \\ ___  __| (_)___ \n"
+                            "   | || | | | | |_) / _ \\/ _` | / __|\n"
+                            "   | || |_| | |  _ <  __/ (_| | \\__ \\\n"
+                            "   |_| \\__,_|_|_| \\_\\___|\\__,_|_|___/[/]",
                             classes="ascii-art",
                         )
                         yield Static("Redis Terminal UI Client", id="connect-subtitle")
