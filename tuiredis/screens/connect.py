@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Center, Horizontal, Vertical, VerticalScroll
 from textual.events import Mount
 from textual.screen import Screen
@@ -16,7 +17,7 @@ from tuiredis.config import ConnectionProfile, delete_connection, load_connectio
 class ConnectScreen(Screen):
     """Initial screen with a connection form."""
 
-    BINDINGS = [("q", "quit", "Quit")]
+    BINDINGS = [Binding("q", "quit", "Quit", priority=True)]
 
     DEFAULT_CSS = """
     ConnectScreen {
@@ -170,6 +171,13 @@ class ConnectScreen(Screen):
         super().__init__(**kwargs)
         self.profiles: dict[str, ConnectionProfile] = {}
         self.current_profile_id: str | None = None
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Prevent 'q' from quitting the app when typing in an Input."""
+        if action == "quit":
+            if isinstance(self.app.focused, Input):
+                return False
+        return True
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)

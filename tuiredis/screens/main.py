@@ -24,6 +24,13 @@ class MainScreen(Screen):
         super().__init__(**kwargs)
         self._virtual_keys: dict[str, str] = {}
 
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Prevent priority bindings from quitting when typing in an Input."""
+        if action in ("quit", "switch_connection"):
+            if isinstance(self.app.focused, Input):
+                return False
+        return True
+
     BINDINGS = [
         Binding("q", "quit", "Quit", priority=True),
         Binding("ctrl+o", "switch_connection", "Switch Connection", priority=True),
