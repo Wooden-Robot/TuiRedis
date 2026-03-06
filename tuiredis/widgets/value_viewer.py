@@ -93,6 +93,10 @@ class ValueViewer(Widget):
         height: 1fr;
         margin: 1 0;
     }
+    ValueViewer #vv-hash-actions {
+        height: 3;
+        align: right middle;
+    }
     """
 
     class LoadMore(Message):
@@ -254,7 +258,7 @@ class ValueViewer(Widget):
                     Button("✕ Clear", id="vv-clear-selection"),
                     Button("Delete", variant="error", id="vv-delete-hash"),
                     Button("📤 Export", id="vv-export"),
-                    classes="vv-add-buttons",
+                    id="vv-hash-actions",
                 ),
                 id="vv-hash-editor",
             )
