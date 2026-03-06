@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import signal
 import subprocess
 import sys
 
@@ -14,11 +15,11 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header, Input, Select, Static, TabbedContent, TabPane
 
 from tuiredis.screens.new_key_modal import NewKeyModal
-from tuiredis.widgets.command_input import CommandInput
 from tuiredis.widgets.key_detail import KeyDetail
 from tuiredis.widgets.key_tree import KeyTree
 from tuiredis.widgets.server_info import ServerInfo
 from tuiredis.widgets.value_viewer import ValueViewer
+
 
 
 class MainScreen(Screen):
@@ -27,6 +28,7 @@ class MainScreen(Screen):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._virtual_keys: dict[str, str] = {}
+        self._iredis_proc: subprocess.Popen | None = None  # suspended iredis session
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Prevent priority bindings from quitting when typing in an Input."""
@@ -50,7 +52,7 @@ class MainScreen(Screen):
     MainScreen {
         layout: grid;
         grid-size: 1;
-        grid-rows: 1fr auto;
+        grid-rows: 1fr;
     }
     #main-body {
         height: 1fr;
@@ -92,10 +94,6 @@ class MainScreen(Screen):
         min-width: 24;
         border-left: tall $surface-lighten-2;
     }
-    #bottom-panel {
-        height: 14;
-        border-top: tall $surface-lighten-2;
-    }
     #status-bar {
         dock: bottom;
         height: 1;
@@ -122,8 +120,6 @@ class MainScreen(Screen):
                     yield ServerInfo(id="server-info")
             with Vertical(id="right-panel"):
                 yield KeyDetail(id="key-detail")
-        with Vertical(id="bottom-panel"):
-            yield CommandInput(id="command-input")
         yield Static("", id="status-bar")
         yield Footer()
 
@@ -289,7 +285,57 @@ class MainScreen(Screen):
         env["IREDIS_URL"] = url
 
         with self.app.suspend():
-            subprocess.run([iredis_bin], check=False, env=env)
+            stdin_fd = sys.stdin.fileno()
+
+            if self._iredis_proc is not None:
+                # Resume the previously suspended iredis session
+                proc = self._iredis_proc
+                os.kill(-proc.pid, signal.SIGCONT)   # SIGCONT to the whole process group
+            else:
+                # Start iredis in its own process group so Ctrl+Z only affects it
+                proc = subprocess.Popen(
+                    [iredis_bin],
+                    env=env,
+                    preexec_fn=os.setpgrp,  # new process group, pgid == proc.pid
+                )
+                self._iredis_proc = proc
+
+            # Hand terminal control to iredis's process group
+            # Ignore SIGTTOU so tcsetpgrp doesn't block us while we're "background"
+            old_sigttou = signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+            try:
+                os.tcsetpgrp(stdin_fd, proc.pid)
+            except OSError:
+                pass
+
+            # Wait for iredis to exit OR be suspended by Ctrl+Z
+            while True:
+                try:
+                    _, status = os.waitpid(proc.pid, os.WUNTRACED)
+                except ChildProcessError:
+                    self._iredis_proc = None
+                    break
+
+                if os.WIFSTOPPED(status):
+                    # iredis is now suspended — reclaim terminal and return to TuiRedis
+                    break
+                elif os.WIFEXITED(status) or os.WIFSIGNALED(status):
+                    self._iredis_proc = None
+                    break
+
+            # Reclaim terminal control for TuiRedis
+            try:
+                os.tcsetpgrp(stdin_fd, os.getpgrp())
+            except OSError:
+                pass
+            signal.signal(signal.SIGTTOU, old_sigttou)
+
+        # Show a hint in the status bar when iredis is suspended
+        status_bar = self.query_one("#status-bar", Static)
+        if self._iredis_proc is not None:
+            status_bar.update("[dim]IRedis session suspended — Ctrl+T to resume[/]")
+        else:
+            status_bar.update("")
 
     def action_quit(self) -> None:
         client = self._get_client()
@@ -566,34 +612,6 @@ class MainScreen(Screen):
         client.set_ttl(event.key, event.ttl)
         self.notify(f"⏱️  TTL set to {event.ttl}s for {event.key}", timeout=2)
 
-    # ── Command Console Messages ─────────────────────────────────
-
-    def on_command_input_command_submitted(self, event: CommandInput.CommandSubmitted) -> None:
-        client = self._get_client()
-        result = client.execute_command(event.command)
-        console = self.query_one("#command-input", CommandInput)
-        console.write_result(event.command, result)
-
-        # Auto-refresh if write command
-        cmd_upper = event.command.strip().split()[0].upper() if event.command.strip() else ""
-        write_cmds = {
-            "SET",
-            "DEL",
-            "HSET",
-            "HDEL",
-            "LPUSH",
-            "RPUSH",
-            "SADD",
-            "ZADD",
-            "SREM",
-            "ZREM",
-            "RENAME",
-            "EXPIRE",
-            "PERSIST",
-            "FLUSHDB",
-        }
-        if cmd_upper in write_cmds:
-            self._load_keys()
-
     # ── New Key Dialog ───────────────────────────────────────────
+
 

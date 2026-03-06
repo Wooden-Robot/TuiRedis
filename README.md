@@ -23,11 +23,10 @@ A beautiful, high-performance Redis Terminal UI built with Python & [Textual](ht
 - **⚡ Pagination & Elastic Loading** — Safe loading of millions of keys without blocking the TUI. Hash and Set types support cursor-based `HSCAN`/`SSCAN` pagination.
 - **📋 Copy to Clipboard** — One-click copy of any String value to your system clipboard.
 - **📤 Export to File** — Export any key's value to a local file (`.txt` for strings, `.json` for structured types).
-- **⌨️ Command Console** — Execute raw Redis commands directly within the app.
 - **📊 Server Info & Monitoring** — View exact server stats, memory footprints, connected clients, and keyspace utilization.
 - **✨ CRUD Operations** — Create, Read, Update, Delete keys seamlessly.
 - **🎨 Modern Dark Theme** — Redis-branded aesthetics with fluid terminal animations.
-- **🛠️ IRedis Integration** — One-click launch into `iredis` terminal via internal bindings.
+- **🛠️ IRedis Integration** — Press `Ctrl+T` to jump into an `iredis` interactive session. Press `Ctrl+Z` inside iredis to suspend it and return to TuiRedis instantly; press `Ctrl+T` again to resume the same session where you left off.
 
 ### 📦 Installation
 TuiRedis is available on PyPI and can be installed using your preferred Python package manager.
@@ -89,7 +88,7 @@ tuiredis --help
 | `Ctrl+D` | Bulk delete all selected keys |
 | `Tab` | Switch between active panels |
 | `Ctrl+o`| Switch Connection |
-| `Ctrl+t`| Launch IRedis Terminal (`uv` will prompt to install if missing) |
+| `Ctrl+t`| Toggle IRedis session — launch, suspend (`Ctrl+Z` in iredis), and resume seamlessly |
 | `Ctrl+i`| Toggle Server Info Panel |
 
 ---
