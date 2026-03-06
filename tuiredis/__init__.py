@@ -1,3 +1,3 @@
-"""tuiredis - A beautiful Redis TUI client."""
+"""TuiRedis - Terminal UI for Redis."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

@@ -395,7 +395,7 @@ async def test_value_viewer_list_delete_no_input_shows_warning():
 
 def test_disconnect_with_tunnel():
     """disconnect() should safely close SSH tunnel even if stop() raises."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import MagicMock
 
     from tuiredis.redis_client import RedisClient
 
@@ -428,9 +428,7 @@ def test_disconnect_client_close_raises():
 
 def test_execute_command_bytes():
     """execute_command should decode bytes results."""
-    from unittest.mock import MagicMock, patch
-
-    import redis
+    from unittest.mock import MagicMock
 
     from tuiredis.redis_client import RedisClient
 

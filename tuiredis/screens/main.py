@@ -11,7 +11,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, Select, Static, TabbedContent, TabPane
+from textual.widgets import Footer, Header, Input, Select, Static, TabbedContent, TabPane
 
 from tuiredis.screens.new_key_modal import NewKeyModal
 from tuiredis.widgets.command_input import CommandInput
@@ -597,15 +597,3 @@ class MainScreen(Screen):
 
     # ── New Key Dialog ───────────────────────────────────────────
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        pass  # all button handling is now in child widgets or modals
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle limit-box and search-box Enter submissions."""
-        if event.input.id == "limit-box":
-            self._load_keys()
-            self.notify(f"Keys reloaded (limit: {self._get_page_limit()})", timeout=2)
-        elif event.input.id == "search-box":
-            pattern = f"*{event.value}*" if event.value else "*"
-            self._load_keys(pattern=pattern)
-            self.notify(f"Search matching {pattern}", timeout=2)

@@ -134,7 +134,6 @@ def test_save_connection_deduplication(tmp_path):
 
 def test_save_connection_write_failure(tmp_path):
     """save_connection should not raise even if write fails; temp file is cleaned up."""
-    import io
     with patch("tuiredis.config.Path.home", return_value=tmp_path):
         with patch("builtins.open", side_effect=OSError("disk full")):
             # Should not raise
