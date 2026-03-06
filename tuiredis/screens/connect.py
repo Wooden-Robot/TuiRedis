@@ -398,18 +398,9 @@ class ConnectScreen(Screen):
 
     async def _do_save(self) -> None:
         profile = self._build_profile_from_inputs()
-        connections = save_connection(profile)
-        # Find the saved profile to get its ID in case it was newly generated or deduplicated
-        for p in connections:
-            if (
-                p.get("host") == profile.get("host")
-                and p.get("port") == profile.get("port")
-                and p.get("db") == profile.get("db")
-                and p.get("name") == profile.get("name")
-            ):
-                self.current_profile_id = p.get("id")
-                break
-
+        saved_profile, _ = save_connection(profile)
+        # Use the returned profile directly — its ID is guaranteed to be correct
+        self.current_profile_id = saved_profile.get("id")
         await self._refresh_history()
 
     async def _do_delete(self) -> None:
@@ -418,15 +409,82 @@ class ConnectScreen(Screen):
             self._clear_form()
             await self._refresh_history()
 
+    @staticmethod
+    def _is_valid_host(host: str) -> bool:
+        """Return True if host is a valid IPv4, IPv6, or hostname/FQDN."""
+        import ipaddress
+        import re
+
+        if not host:
+            return False
+        # Try as IP address first (covers both v4 and v6, including brackets like [::1])
+        cleaned = host.strip("[]")
+        try:
+            ipaddress.ip_address(cleaned)
+            return True
+        except ValueError:
+            pass
+        # Validate as hostname / FQDN:
+        # - Must be at least 2 characters (single letters are almost always typos)
+        # - Labels: letters, digits, hyphens; must not start/end with hyphen
+        # - Total length ≤ 253, each label ≤ 63
+        if len(host) < 2 or len(host) > 253:
+            return False
+        hostname_re = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?\.?)+$")
+        return bool(hostname_re.match(host))
+
+    def _validate_profile(self, profile: dict) -> str | None:
+        """Validate connection parameters before attempting network I/O.
+
+        Returns an error message string if invalid, or None if all checks pass.
+        """
+        host = (profile.get("host") or "").strip()
+        if not host:
+            return "Host cannot be empty"
+        if not self._is_valid_host(host):
+            return f"Host {host!r} is not a valid IP address or hostname"
+
+        port = profile.get("port")
+        if not isinstance(port, int) or not (1 <= port <= 65535):
+            return f"Port must be an integer between 1 and 65535 (got {port!r})"
+
+        db = profile.get("db")
+        if not isinstance(db, int) or not (0 <= db <= 15):
+            return f"DB must be between 0 and 15 (got {db!r})"
+
+        if profile.get("use_ssh"):
+            ssh_host = (profile.get("ssh_host") or "").strip()
+            if not ssh_host:
+                return "SSH Host cannot be empty when SSH tunnel is enabled"
+            if not self._is_valid_host(ssh_host):
+                return f"SSH Host {ssh_host!r} is not a valid IP address or hostname"
+            ssh_port = profile.get("ssh_port", 22)
+            if not isinstance(ssh_port, int) or not (1 <= ssh_port <= 65535):
+                return f"SSH Port must be between 1 and 65535 (got {ssh_port!r})"
+
+        return None
+
     async def _do_connect(self) -> None:
+        import asyncio
+
+        from tuiredis.redis_client import RedisClient
+
         profile = self._build_profile_from_inputs()
 
         error_label = self.query_one("#connect-error", Static)
-        error_label.update("🔗 Connecting (this may take a moment)...")
-        error_label.add_class("visible")
-        self.app.refresh()  # Force UI update immediately
+        connect_btn = self.query_one("#connect-btn", Button)
 
-        from tuiredis.redis_client import RedisClient
+        # Fast client-side validation before touching the network
+        validation_error = self._validate_profile(profile)
+        if validation_error:
+            error_label.update(f"⚠️ {validation_error}")
+            error_label.add_class("visible")
+            return
+
+        # Disable button to prevent double-clicks while waiting for socket timeout
+        connect_btn.disabled = True
+        error_label.update("🔗 Connecting...")
+        error_label.add_class("visible")
 
         client = RedisClient(
             host=profile["host"],
@@ -440,22 +498,20 @@ class ConnectScreen(Screen):
             ssh_private_key=profile.get("ssh_private_key"),
         )
 
-        success, err_msg = client.connect()
+        # Run the blocking connect (TCP handshake + optional SSH tunnel) in a thread
+        # so the Textual event loop stays responsive during the connection attempt.
+        success, err_msg = await asyncio.to_thread(client.connect)
+
+        connect_btn.disabled = False
+
         if success:
             error_label.update("")
             error_label.remove_class("visible")
 
-            # Auto-save successful connections if they are new or deduplicated
-            connections = save_connection(profile)
+            # Auto-save successful connections; use the returned profile for its ID.
+            saved_profile, _ = save_connection(profile)
             if not self.current_profile_id:
-                for p in connections:
-                    if (
-                        p.get("host") == profile.get("host")
-                        and p.get("port") == profile.get("port")
-                        and p.get("db") == profile.get("db")
-                    ):
-                        self.current_profile_id = p.get("id")
-                        break
+                self.current_profile_id = saved_profile.get("id")
                 await self._refresh_history()
 
             self.app.redis_client = client  # type: ignore[attr-defined]

@@ -78,7 +78,8 @@ class RedisClient:
                 password=self.password or None,
                 db=self.db,
                 decode_responses=True,
-                socket_connect_timeout=5,
+                socket_connect_timeout=5,  # TCP handshake timeout (seconds)
+                socket_timeout=10,          # read/write timeout after connect
             )
             self._client.ping()
             return True, ""
@@ -187,13 +188,32 @@ class RedisClient:
         """Delete a key. Returns True if the key was deleted."""
         return self.client.delete(key) > 0
 
-    def rename_key(self, old_name: str, new_name: str) -> bool:
-        """Rename a key."""
+    def rename_key(self, old_key: str, new_key: str) -> bool:
         try:
-            self.client.rename(old_name, new_name)
+            self.client.rename(old_key, new_key)
             return True
         except redis.ResponseError:
             return False
+
+    def key_exists(self, key: str) -> bool:
+        """Return True if the key exists in Redis."""
+        return bool(self.client.exists(key))
+
+    def get_ttls(self, keys: list[str]) -> dict[str, int]:
+        """Return TTL for each key via a pipeline. -1 = no expiry, -2 = missing."""
+        if not keys:
+            return {}
+        pipeline = self.client.pipeline(transaction=False)
+        for key in keys:
+            pipeline.ttl(key)
+        results = pipeline.execute()
+        return dict(zip(keys, results, strict=False))
+
+    def delete_keys_batch(self, keys: list[str]) -> int:
+        """Delete multiple keys atomically. Returns number of keys deleted."""
+        if not keys:
+            return 0
+        return self.client.delete(*keys)  # type: ignore[return-value]
 
     def set_ttl(self, key: str, ttl: int) -> bool:
         """Set TTL on a key. Use -1 to remove expiry."""
@@ -209,8 +229,17 @@ class RedisClient:
     def set_string(self, key: str, value: str, ttl: int | None = None):
         self.client.set(key, value, ex=ttl if ttl and ttl > 0 else None)
 
+    # Maximum number of collection elements shown in the value viewer at once.
+    # This protects the UI against blocking on very large keys.
+    DISPLAY_LIMIT = 500
+
     def get_list(self, key: str, start: int = 0, end: int = -1) -> list[str]:
+        if end == -1:
+            end = self.DISPLAY_LIMIT - 1
         return self.client.lrange(key, start, end)  # type: ignore[return-value]
+
+    def get_list_count(self, key: str) -> int:
+        return self.client.llen(key)  # type: ignore[return-value]
 
     def list_push(self, key: str, *values: str):
         self.client.rpush(key, *values)
@@ -221,8 +250,33 @@ class RedisClient:
     def list_remove(self, key: str, value: str, count: int = 1):
         self.client.lrem(key, count, value)
 
+    def list_delete_by_index(self, key: str, index: int) -> None:
+        """Delete the element at `index` from a list without touching duplicate values.
+
+        Strategy: LSET the position to a unique tombstone, then LREM 1 occurrence.
+        """
+        tombstone = "__TUIREDIS_DEL_TOMBSTONE__"
+        self.client.lset(key, index, tombstone)
+        self.client.lrem(key, 1, tombstone)
+
     def get_hash(self, key: str) -> dict[str, str]:
-        return self.client.hgetall(key)  # type: ignore[return-value]
+        count = self.client.hlen(key)
+        if count <= self.DISPLAY_LIMIT:
+            return self.client.hgetall(key)  # type: ignore[return-value]
+        result: dict[str, str] = {}
+        _, pairs = self.client.hscan(key, cursor=0, count=self.DISPLAY_LIMIT)
+        result.update(pairs)
+        return result
+
+    def scan_hash(self, key: str, cursor: int = 0, count: int = 500) -> tuple[int, dict[str, str]]:
+        """Return (next_cursor, {field: value}) using HSCAN.
+        cursor=0 to start; returns cursor=0 when scan is complete.
+        """
+        next_cursor, pairs = self.client.hscan(key, cursor=cursor, count=count)
+        return int(next_cursor), dict(pairs)
+
+    def get_hash_count(self, key: str) -> int:
+        return self.client.hlen(key)  # type: ignore[return-value]
 
     def hash_set(self, key: str, field: str, value: str):
         self.client.hset(key, field, value)
@@ -231,7 +285,21 @@ class RedisClient:
         self.client.hdel(key, *fields)
 
     def get_set(self, key: str) -> set[str]:
-        return self.client.smembers(key)  # type: ignore[return-value]
+        count = self.client.scard(key)
+        if count <= self.DISPLAY_LIMIT:
+            return self.client.smembers(key)  # type: ignore[return-value]
+        result: set[str] = set()
+        _, members = self.client.sscan(key, cursor=0, count=self.DISPLAY_LIMIT)
+        result.update(members)
+        return result
+
+    def scan_set(self, key: str, cursor: int = 0, count: int = 500) -> tuple[int, list[str]]:
+        """Return (next_cursor, [member, ...]) using SSCAN."""
+        next_cursor, members = self.client.sscan(key, cursor=cursor, count=count)
+        return int(next_cursor), list(members)
+
+    def get_set_count(self, key: str) -> int:
+        return self.client.scard(key)  # type: ignore[return-value]
 
     def set_add(self, key: str, *members: str):
         self.client.sadd(key, *members)
@@ -240,7 +308,12 @@ class RedisClient:
         self.client.srem(key, *members)
 
     def get_zset(self, key: str, start: int = 0, end: int = -1) -> list[tuple[str, float]]:
+        if end == -1:
+            end = self.DISPLAY_LIMIT - 1
         return self.client.zrange(key, start, end, withscores=True)  # type: ignore[return-value]
+
+    def get_zset_count(self, key: str) -> int:
+        return self.client.zcard(key)  # type: ignore[return-value]
 
     def zset_add(self, key: str, member: str, score: float):
         self.client.zadd(key, {member: score})
@@ -298,7 +371,7 @@ class RedisClient:
                     lines.append(f"{k}: {v}")
                 return "\n".join(lines)
             if isinstance(result, bool):
-                return "OK" if result else "(error)"
+                return "1" if result else "0"
             if isinstance(result, bytes):
                 return result.decode("utf-8", errors="replace")
             return str(result)

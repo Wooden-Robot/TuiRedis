@@ -53,6 +53,7 @@ class TRedisApp(App):
         self._auto_connect = auto_connect
 
     def on_mount(self) -> None:
+        self.theme = "dracula"
         if self._auto_connect:
             success, _ = self.redis_client.connect()
             if success:

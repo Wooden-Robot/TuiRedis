@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import fnmatch
+import os
 import subprocess
+import sys
 
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, RadioButton, RadioSet, Select, Static, TabbedContent, TabPane
+from textual.widgets import Button, Footer, Header, Input, Select, Static, TabbedContent, TabPane
 
+from tuiredis.screens.new_key_modal import NewKeyModal
 from tuiredis.widgets.command_input import CommandInput
 from tuiredis.widgets.key_detail import KeyDetail
 from tuiredis.widgets.key_tree import KeyTree
@@ -39,6 +43,7 @@ class MainScreen(Screen):
         Binding("n", "new_key", "New Key"),
         Binding("ctrl+i", "toggle_info", "Server Info"),
         Binding("ctrl+t", "open_iredis", "IRedis Terminal"),
+        Binding("ctrl+d", "bulk_delete", "Bulk Delete", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -98,55 +103,6 @@ class MainScreen(Screen):
         color: $text-muted;
         padding: 0 2;
     }
-    /* New key dialog */
-    #new-key-overlay {
-        display: none;
-        align: center middle;
-        background: rgba(0, 0, 0, 0.7);
-        layer: overlay;
-    }
-    #new-key-overlay.visible {
-        display: block;
-    }
-    #new-key-card {
-        width: 60;
-        height: auto;
-        padding: 2;
-        background: $surface;
-        border: heavy #DC382D;
-    }
-    #nk-type-radios {
-        height: auto;
-        layout: horizontal;
-        margin: 0 0 1 0;
-    }
-    #nk-type-radios RadioButton {
-        width: auto;
-        margin: 0 1 0 0;
-        padding: 0;
-    }
-    #new-key-card Input {
-        margin: 0 0 1 0;
-    }
-    #new-key-card .dialog-title {
-        text-align: center;
-        text-style: bold;
-        color: #DC382D;
-        padding: 0 0 1 0;
-    }
-    #new-key-btns {
-        height: auto;
-        align: right middle;
-    }
-    #new-key-btns Button {
-        margin: 0 1;
-    }
-    #nk-input-container {
-        height: auto;
-    }
-    #nk-input-container Horizontal {
-        height: auto;
-    }
     """
 
     def compose(self) -> ComposeResult:
@@ -168,20 +124,7 @@ class MainScreen(Screen):
                 yield KeyDetail(id="key-detail")
         with Vertical(id="bottom-panel"):
             yield CommandInput(id="command-input")
-        # New key overlay
-        with Vertical(id="new-key-overlay"):
-            with Vertical(id="new-key-card"):
-                yield Static("✨ New Key", classes="dialog-title")
-                with RadioSet(id="nk-type-radios"):
-                    yield RadioButton("String", value=True, id="nk-rb-string")
-                    yield RadioButton("List", id="nk-rb-list")
-                    yield RadioButton("Hash", id="nk-rb-hash")
-                    yield RadioButton("Set", id="nk-rb-set")
-                    yield RadioButton("ZSet", id="nk-rb-zset")
-                yield Input(placeholder="Key name", id="nk-name")
-                with Horizontal(id="new-key-btns"):
-                    yield Button("Cancel", variant="default", id="nk-cancel")
-                    yield Button("Create", variant="primary", id="nk-create")
+        yield Static("", id="status-bar")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -209,6 +152,7 @@ class MainScreen(Screen):
             db_select.value = str(client.db)
 
         self.query_one("#value-viewer", ValueViewer).show_empty()
+        self._virtual_keys.clear()  # stale virtual keys don't apply to new connection
 
         # Reset pagination/search
         tree = self.query_one("#key-tree", KeyTree)
@@ -229,7 +173,7 @@ class MainScreen(Screen):
         except Exception:
             return 2000
 
-    def _load_keys(self, pattern: str | None = None):
+    def _load_keys(self, pattern: str | None = None) -> None:
         if pattern is not None:
             self._current_pattern = pattern
         elif not hasattr(self, "_current_pattern"):
@@ -240,10 +184,7 @@ class MainScreen(Screen):
             cursor=0, pattern=self._current_pattern, count=self._get_page_limit()
         )
 
-        # Overwrite with virtual keys if they match the pattern
-        import fnmatch
-
-        for v_key in getattr(self, "_virtual_keys", {}):
+        for v_key in self._virtual_keys:
             if fnmatch.fnmatch(v_key, self._current_pattern):
                 if v_key not in keys:
                     keys.append(v_key)
@@ -251,12 +192,19 @@ class MainScreen(Screen):
         # Get types for all keys (optimized batch)
         key_types = client.get_types(keys)
 
-        for v_key, v_type in getattr(self, "_virtual_keys", {}).items():
+        for v_key, v_type in self._virtual_keys.items():
             if v_key in keys and key_types.get(v_key, "none") == "none":
                 key_types[v_key] = v_type
 
+        # Fetch TTLs for expiry indicators (limit to 2000 to avoid stalling)
+        ttl_sample = keys[:2000]
+        try:
+            ttl_map = client.get_ttls(ttl_sample)
+        except Exception:
+            ttl_map = {}
+
         tree = self.query_one("#key-tree", KeyTree)
-        tree.load_keys(keys, key_types, next_cursor=next_cursor)
+        tree.load_keys(keys, key_types, next_cursor=next_cursor, ttl_map=ttl_map)
         self._load_db_options()
 
     def _load_db_options(self):
@@ -301,9 +249,19 @@ class MainScreen(Screen):
         self.query_one("#search-box", Input).focus()
 
     def action_new_key(self) -> None:
-        overlay = self.query_one("#new-key-overlay")
-        overlay.add_class("visible")
-        self.query_one("#nk-name", Input).focus()
+        self.app.push_screen(NewKeyModal(), self._on_new_key_created)
+
+    def _on_new_key_created(self, result) -> None:
+        """Callback from NewKeyModal — result is KeyCreated or None (cancelled)."""
+        if result is None:
+            return
+        key = result.key
+        key_type = result.key_type
+        if not result.wrote_to_redis:
+            self._virtual_keys[key] = key_type
+        self._load_keys()
+        self.notify(f"✨ Created {key_type} key: {key}", timeout=2)
+        self.query_one("#key-tree", KeyTree).post_message(KeyTree.KeySelected(key))
 
     def action_toggle_info(self) -> None:
         tabs = self.query_one("#center-panel", TabbedContent)
@@ -314,9 +272,6 @@ class MainScreen(Screen):
         self._run_iredis()
 
     def _run_iredis(self) -> None:
-        import os
-        import sys
-
         iredis_bin = os.path.join(os.path.dirname(sys.executable), "iredis")
         client = self._get_client()
 
@@ -362,6 +317,7 @@ class MainScreen(Screen):
             if client.db != new_db:
                 client.switch_db(new_db)
                 self.query_one("#value-viewer", ValueViewer).show_empty()
+                self._virtual_keys.clear()  # virtual keys are DB-scoped
                 self._load_keys()
                 self.notify(f"Switched to DB {new_db}", timeout=2)
 
@@ -394,11 +350,39 @@ class MainScreen(Screen):
 
         if keys:
             key_types = client.get_types(keys)
-            tree.append_keys(keys, key_types, next_cursor)
+            try:
+                ttl_map = client.get_ttls(keys[:2000])
+            except Exception:
+                ttl_map = {}
+            tree.append_keys(keys, key_types, next_cursor, ttl_map=ttl_map)
         else:
-            # If redis returned empty batch but non-zero cursor
             tree._next_cursor = next_cursor
             tree._rebuild_tree()
+
+    def on_key_tree_selection_changed(self, event: KeyTree.SelectionChanged) -> None:
+        """Show selection count in the status bar."""
+        n = len(event.selected_keys)
+        if n == 0:
+            self.query_one("#status-bar", Static).update("")
+        else:
+            self.query_one("#status-bar", Static).update(
+                f"[bold yellow]☑ {n} key{'s' if n != 1 else ''} selected[/]  "
+                f"[dim]Ctrl+D to delete all selected[/]"
+            )
+
+    def action_bulk_delete(self) -> None:
+        """Delete all currently selected keys."""
+        tree = self.query_one("#key-tree", KeyTree)
+        selected = tree.bulk_delete_selected()
+        if not selected:
+            self.notify("No keys selected — press Space on a key to select it", timeout=3)
+            return
+        client = self._get_client()
+        deleted = client.delete_keys_batch(list(selected))
+        self.query_one("#status-bar", Static).update("")
+        self.notify(f"🗑️ Deleted {deleted} key{'s' if deleted != 1 else ''}", timeout=3)
+        self.query_one("#value-viewer", ValueViewer).show_empty()
+        self._load_keys()
 
     async def on_key_tree_key_selected(self, event: KeyTree.KeySelected) -> None:
         """When a key is selected in the tree, show its value and detail."""
@@ -413,8 +397,8 @@ class MainScreen(Screen):
 
         # Show value
         viewer = self.query_one("#value-viewer", ValueViewer)
-        data = self._get_value(key, key_type)
-        await viewer.show_value(key, key_type, data)
+        data, total_count = self._get_value(key, key_type)
+        await viewer.show_value(key, key_type, data, total_count=total_count)
 
         # Show detail
         detail = self.query_one("#key-detail", KeyDetail)
@@ -427,19 +411,20 @@ class MainScreen(Screen):
         tabs = self.query_one("#center-panel", TabbedContent)
         tabs.active = "tab-value"
 
-    def _get_value(self, key: str, key_type: str):
+    def _get_value(self, key: str, key_type: str) -> tuple:
+        """Return (data, total_count). total_count is None for string keys."""
         client = self._get_client()
         if key_type == "string":
-            return client.get_string(key)
+            return client.get_string(key), None
         elif key_type == "list":
-            return client.get_list(key)
+            return client.get_list(key), client.get_list_count(key)
         elif key_type == "hash":
-            return client.get_hash(key)
+            return client.get_hash(key), client.get_hash_count(key)
         elif key_type == "set":
-            return client.get_set(key)
+            return client.get_set(key), client.get_set_count(key)
         elif key_type == "zset":
-            return client.get_zset(key)
-        return None
+            return client.get_zset(key), client.get_zset_count(key)
+        return None, None
 
     # ── Value Viewer Messages ────────────────────────────────────
 
@@ -469,9 +454,9 @@ class MainScreen(Screen):
 
             # Refresh the view
             key_type = client.get_type(event.key)
-            data = self._get_value(event.key, key_type)
+            data, total_count = self._get_value(event.key, key_type)
             viewer = self.query_one("#value-viewer", ValueViewer)
-            await viewer.show_value(event.key, key_type, data)
+            await viewer.show_value(event.key, key_type, data, total_count=total_count)
             self.notify(f"✅ Saved to {event.key}", timeout=2)
         except Exception as e:
             self.notify(f"⚠️ Edit failed: {e}", severity="error", timeout=4)
@@ -480,8 +465,13 @@ class MainScreen(Screen):
         client = self._get_client()
         try:
             if event.value_type == "list":
-                # For Redis, list_remove removes by value. Textual passes the actual string value.
-                client.list_remove(event.key, event.data, 1)
+                idx, val = event.data
+                if idx is not None:
+                    # Precise index-based deletion — safe even when list contains duplicates
+                    client.list_delete_by_index(event.key, idx)
+                else:
+                    # Fallback: delete by value (removes first occurrence)
+                    client.list_remove(event.key, val, 1)
             elif event.value_type == "hash":
                 client.hash_delete(event.key, event.data)
             elif event.value_type == "set":
@@ -496,12 +486,40 @@ class MainScreen(Screen):
                 self.query_one("#value-viewer", ValueViewer).show_empty()
                 self._load_keys()
             else:
-                data = self._get_value(event.key, key_type)
+                data, total_count = self._get_value(event.key, key_type)
                 viewer = self.query_one("#value-viewer", ValueViewer)
-                await viewer.show_value(event.key, key_type, data)
+                await viewer.show_value(event.key, key_type, data, total_count=total_count)
             self.notify(f"🗑️ Deleted from {event.key}", timeout=2)
         except Exception as e:
             self.notify(f"⚠️ Delete failed: {e}", severity="error", timeout=4)
+
+    async def on_value_viewer_load_more(self, event: ValueViewer.LoadMore) -> None:
+        """Fetch the next page of list/zset/hash/set data and append it to the viewer."""
+        client = self._get_client()
+        viewer = self.query_one("#value-viewer", ValueViewer)
+        try:
+            if event.value_type == "list":
+                start = event.offset
+                end = start + client.DISPLAY_LIMIT - 1
+                new_data = client.get_list(event.key, start=start, end=end)
+                total = client.get_list_count(event.key)
+                viewer.append_rows(new_data, total)
+            elif event.value_type == "zset":
+                start = event.offset
+                end = start + client.DISPLAY_LIMIT - 1
+                new_data = client.get_zset(event.key, start=start, end=end)
+                total = client.get_zset_count(event.key)
+                viewer.append_rows(new_data, total)
+            elif event.value_type == "hash":
+                next_cursor, new_data = client.scan_hash(event.key, cursor=event.cursor)
+                total = client.get_hash_count(event.key)
+                viewer.append_rows(new_data, total, next_cursor=next_cursor)
+            elif event.value_type == "set":
+                next_cursor, new_data = client.scan_set(event.key, cursor=event.cursor)
+                total = client.get_set_count(event.key)
+                viewer.append_rows(new_data, total, next_cursor=next_cursor)
+        except Exception as e:
+            self.notify(f"⚠️ Load more failed: {e}", severity="error", timeout=4)
 
     # ── Key Detail Messages ──────────────────────────────────────
 
@@ -509,13 +527,39 @@ class MainScreen(Screen):
         client = self._get_client()
         client.delete_key(event.key)
 
-        if hasattr(self, "_virtual_keys") and event.key in self._virtual_keys:
+        if event.key in self._virtual_keys:
             del self._virtual_keys[event.key]
 
         self._load_keys()
         viewer = self.query_one("#value-viewer", ValueViewer)
         viewer.show_empty()
         self.notify(f"🗑️  Deleted {event.key}", timeout=2)
+
+    async def on_key_detail_key_renamed(self, event: KeyDetail.KeyRenamed) -> None:
+        client = self._get_client()
+        success = client.rename_key(event.old_key, event.new_key)
+        if not success:
+            self.notify(f"⚠️ Rename failed: {event.old_key!r} may not exist or target already exists", severity="error", timeout=4)
+            return
+
+        # Update virtual keys tracking if applicable
+        if event.old_key in self._virtual_keys:
+            self._virtual_keys[event.new_key] = self._virtual_keys.pop(event.old_key)
+
+        self._load_keys()
+        self.notify(f"✏️  Renamed {event.old_key!r} → {event.new_key!r}", timeout=2)
+
+        # Re-open the renamed key in the value viewer
+        key_type = client.get_type(event.new_key)
+        data, total_count = self._get_value(event.new_key, key_type)
+        viewer = self.query_one("#value-viewer", ValueViewer)
+        await viewer.show_value(event.new_key, key_type, data, total_count=total_count)
+
+        detail = self.query_one("#key-detail", KeyDetail)
+        ttl = client.get_ttl(event.new_key)
+        encoding = client.get_encoding(event.new_key)
+        memory = client.get_memory_usage(event.new_key)
+        await detail.show_detail(event.new_key, key_type, ttl, encoding, memory)
 
     async def on_key_detail_ttl_set(self, event: KeyDetail.TtlSet) -> None:
         client = self._get_client()
@@ -553,40 +597,15 @@ class MainScreen(Screen):
 
     # ── New Key Dialog ───────────────────────────────────────────
 
-    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
-        pass
-
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "nk-cancel":
-            self.query_one("#new-key-overlay").remove_class("visible")
-        elif event.button.id == "nk-create":
-            radio_set = self.query_one("#nk-type-radios", RadioSet)
-            name_input = self.query_one("#nk-name", Input)
+        pass  # all button handling is now in child widgets or modals
 
-            # map radio button ID to key_type
-            rb_id_map = {
-                "nk-rb-string": "string",
-                "nk-rb-list": "list",
-                "nk-rb-hash": "hash",
-                "nk-rb-set": "set",
-                "nk-rb-zset": "zset",
-            }
-
-            pressed_id = radio_set.pressed_button.id if radio_set.pressed_button else "nk-rb-string"
-            key_type = rb_id_map.get(pressed_id, "string")
-
-            name = name_input.value.strip()
-
-            if name:
-                # We do not immediately store empty values into Redis because Redis automatically
-                # deletes Hash/Set/List/Zset that are completely empty.
-                # Instead, we create a "virtual key" that exists locally in the UI.
-                # It will physically save to Redis once you add the first value in the right panel.
-                if not hasattr(self, "_virtual_keys"):
-                    self._virtual_keys = {}
-                self._virtual_keys[name] = key_type
-
-                name_input.value = ""
-                self.query_one("#new-key-overlay").remove_class("visible")
-                self._load_keys()
-                self.notify(f"✨ Created virtual {key_type} key: {name}", timeout=2)
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle limit-box and search-box Enter submissions."""
+        if event.input.id == "limit-box":
+            self._load_keys()
+            self.notify(f"Keys reloaded (limit: {self._get_page_limit()})", timeout=2)
+        elif event.input.id == "search-box":
+            pattern = f"*{event.value}*" if event.value else "*"
+            self._load_keys(pattern=pattern)
+            self.notify(f"Search matching {pattern}", timeout=2)

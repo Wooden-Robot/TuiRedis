@@ -15,14 +15,17 @@ A beautiful, high-performance Redis Terminal UI built with Python & [Textual](ht
 ---
 
 ### 🚀 Features
-- **🔗 Connection Management** — Connect to any Redis instance (supports Password / DB Indexing).
+- **🔗 Connection Management** — Connect to any Redis instance (supports Password / DB Indexing / SSH Tunnel).
 - **🌲 Hierarchical Key Browser** — Interactive Tree view grouping keys by `:` separator with real-time fuzzy search.
+- **⏱️ TTL Expiry Indicators** — Keys color-coded by expiry: 🔴 critical (< 60s), ⏱ expiring (< 1h).
+- **☑ Multi-select & Bulk Delete** — Press `Space` on any key to select, `Ctrl+D` to delete all selected keys at once.
 - **📄 Advanced Value Viewer** — Native support for viewing & editing `String`, `List`, `Hash`, `Set`, and `Sorted Set`.
-- **⚡ Pagination & Elastic Loading** — Safe loading of millions of keys without blocking the TUI.
+- **⚡ Pagination & Elastic Loading** — Safe loading of millions of keys without blocking the TUI. Hash and Set types support cursor-based `HSCAN`/`SSCAN` pagination.
+- **📋 Copy to Clipboard** — One-click copy of any String value to your system clipboard.
+- **📤 Export to File** — Export any key's value to a local file (`.txt` for strings, `.json` for structured types).
 - **⌨️ Command Console** — Execute raw Redis commands directly within the app.
 - **📊 Server Info & Monitoring** — View exact server stats, memory footprints, connected clients, and keyspace utilization.
 - **✨ CRUD Operations** — Create, Read, Update, Delete keys seamlessly.
-- **⏱️ TTL Management** — View and set key expiration intuitively.
 - **🎨 Modern Dark Theme** — Redis-branded aesthetics with fluid terminal animations.
 - **🛠️ IRedis Integration** — One-click launch into `iredis` terminal via internal bindings.
 
@@ -82,6 +85,8 @@ tuiredis --help
 | `F5` | Refresh Key Tree & Info |
 | `/` | Focus search bar |
 | `n` | Create a New Key |
+| `Space` | Toggle key selection (in Key Tree) |
+| `Ctrl+D` | Bulk delete all selected keys |
 | `Tab` | Switch between active panels |
 | `Ctrl+o`| Switch Connection |
 | `Ctrl+t`| Launch IRedis Terminal (`uv` will prompt to install if missing) |

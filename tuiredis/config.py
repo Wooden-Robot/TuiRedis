@@ -66,11 +66,11 @@ def load_connections() -> list[ConnectionProfile]:
         return []
 
 
-def save_connection(profile: ConnectionProfile) -> list[ConnectionProfile]:
+def save_connection(profile: ConnectionProfile) -> tuple[ConnectionProfile, list[ConnectionProfile]]:
     """Save a connection profile. If it lacks an ID, generate one.
     Updates existing profiles with the same ID.
     If no ID is passed, checks for existing profiles with the same connection details to update instead of duplicate.
-    Returns the updated list of profiles.
+    Returns a tuple of (saved_profile, updated_list_of_profiles).
     """
     config_file = get_connections_file()
     connections = load_connections()
@@ -110,20 +110,22 @@ def save_connection(profile: ConnectionProfile) -> list[ConnectionProfile]:
     if not updated:
         connections.append(profile)
 
+    temp_file = config_file.with_suffix(".tmp")
     try:
         # Create a temporary file, write data, set permissions, then rename
         # This prevents permission race conditions on new files
-        temp_file = config_file.with_suffix(".tmp")
         with temp_file.open("w", encoding="utf-8") as f:
             json.dump(connections, f, indent=2)
         temp_file.chmod(0o600)  # Read/write by owner only
         os.replace(temp_file, config_file)
     except Exception as e:
         logger.error(f"Failed to save connections configuration: {e}")
-        if "temp_file" in locals() and temp_file.exists():
-            temp_file.unlink()
+        try:
+            temp_file.unlink(missing_ok=True)
+        except OSError:
+            pass
 
-    return connections
+    return profile, connections
 
 
 def delete_connection(profile_id: str) -> list[ConnectionProfile]:
@@ -133,13 +135,17 @@ def delete_connection(profile_id: str) -> list[ConnectionProfile]:
 
     connections = [c for c in connections if c.get("id") != profile_id]
 
+    temp_file = config_file.with_suffix(".tmp")
     try:
-        temp_file = config_file.with_suffix(".tmp")
         with temp_file.open("w", encoding="utf-8") as f:
             json.dump(connections, f, indent=2)
         temp_file.chmod(0o600)
         os.replace(temp_file, config_file)
     except Exception as e:
         logger.error(f"Failed to save connections configuration after deletion: {e}")
+        try:
+            temp_file.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     return connections

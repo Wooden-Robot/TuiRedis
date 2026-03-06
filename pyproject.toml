@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Database",
 ]
 dependencies = [
-    "textual>=8.0.0",
+    "textual>=8.0.2",
     "redis>=5.0.0",
     "iredis>=1.14.0",
     "sshtunnel>=0.4.0",

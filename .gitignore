@@ -26,3 +26,5 @@ htmlcov/
 
 # UV
 uv.lock
+tuiredis/tuiredis_export_*.json
+tuiredis/tuiredis_export_*.txt

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Button, Input, Static
@@ -21,24 +21,33 @@ class KeyDetail(Widget):
     KeyDetail #kd-content {
         padding: 1;
     }
-    KeyDetail #kd-actions {
-        padding: 0 1;
+    /* Shared section style for rename and TTL groups */
+    KeyDetail .kd-section {
+        height: auto;
+        padding: 0 1 1 1;
+        border-top: solid $surface-lighten-2;
+    }
+    KeyDetail .kd-section-label {
+        color: $text-muted;
+        text-style: bold;
+        padding: 0;
         height: auto;
     }
-    KeyDetail #kd-actions Button {
+    KeyDetail .kd-section Input {
         width: 100%;
         margin: 0 0 1 0;
     }
-    KeyDetail #kd-ttl-row {
-        height: auto;
-        padding: 0 1;
-    }
-    KeyDetail #kd-ttl-row Input {
-        width: 1fr;
-    }
-    KeyDetail #kd-ttl-row Button {
+    KeyDetail .kd-section Button {
         width: auto;
-        min-width: 8;
+        margin: 0;
+    }
+    KeyDetail #kd-actions {
+        height: auto;
+        padding: 1 1 0 1;
+        border-top: solid $surface-lighten-2;
+    }
+    KeyDetail #kd-actions Button {
+        width: 100%;
     }
     """
 
@@ -94,15 +103,23 @@ class KeyDetail(Widget):
             f"[bold]Memory:[/]   {memory_display}\n"
         )
 
-        from textual.containers import Horizontal
-
         container = Vertical(
             Static(info_text, id="kd-content"),
-            Horizontal(
-                Input(placeholder="TTL (seconds)", id="kd-ttl-input", type="integer"),
-                Button("Set", variant="primary", id="kd-set-ttl"),
-                id="kd-ttl-row",
+            # ── Rename section ───────────────────────────────────
+            Vertical(
+                Static("[bold #F5A623]✏️  Rename Key[/]", classes="kd-section-label"),
+                Input(placeholder="new name", id="kd-rename-input"),
+                Button("✏️ Rename", variant="warning", id="kd-rename"),
+                classes="kd-section",
             ),
+            # ── TTL section ──────────────────────────────────────────
+            Vertical(
+                Static("[bold #2196F3]⏱  Set Expiry[/]  [dim](-1 = no expiry)[/]", classes="kd-section-label"),
+                Input(placeholder="seconds", id="kd-ttl-input", type="integer"),
+                Button("⏱ Set TTL", variant="primary", id="kd-set-ttl"),
+                classes="kd-section",
+            ),
+            # ── Danger zone ──────────────────────────────────────
             Vertical(
                 Button("🗑️  Delete Key", variant="error", id="kd-delete"),
                 id="kd-actions",
@@ -115,6 +132,16 @@ class KeyDetail(Widget):
             return
         if event.button.id == "kd-delete":
             self.post_message(self.KeyDeleted(self._current_key))
+        elif event.button.id == "kd-rename":
+            inp = self.query_one("#kd-rename-input", Input)
+            new_name = inp.value.strip()
+            if not new_name:
+                return
+            if new_name == self._current_key:
+                inp.value = ""
+                return
+            self.post_message(self.KeyRenamed(self._current_key, new_name))
+            inp.value = ""
         elif event.button.id == "kd-set-ttl":
             inp = self.query_one("#kd-ttl-input", Input)
             try:

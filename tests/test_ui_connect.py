@@ -18,7 +18,10 @@ def mock_redis_client():
                     with patch.object(RedisClient, "get_types", return_value={}):
                         with (
                             patch("tuiredis.screens.connect.load_connections", return_value=[]),
-                            patch("tuiredis.screens.connect.save_connection"),
+                            patch(
+                                "tuiredis.screens.connect.save_connection",
+                                return_value=({"id": "test-id", "host": "127.0.0.1", "port": 6379, "db": 0}, []),
+                            ),
                         ):
                             yield
 

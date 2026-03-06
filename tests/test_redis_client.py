@@ -28,7 +28,7 @@ class TestRedisClient(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(msg, "")
         mock_redis_class.assert_called_once_with(
-            host="localhost", port=6379, password="pass", db=1, decode_responses=True, socket_connect_timeout=5
+            host="localhost", port=6379, password="pass", db=1, decode_responses=True, socket_connect_timeout=5, socket_timeout=10
         )
         mock_instance.ping.assert_called_once()
 
@@ -103,7 +103,7 @@ class TestRedisClient(unittest.TestCase):
 
         # Should connect to the local forwarded port
         mock_redis_class.assert_called_once_with(
-            host="127.0.0.1", port=9999, password=None, db=0, decode_responses=True, socket_connect_timeout=5
+            host="127.0.0.1", port=9999, password=None, db=0, decode_responses=True, socket_connect_timeout=5, socket_timeout=10
         )
         mock_redis_instance.ping.assert_called_once()
 
@@ -257,7 +257,14 @@ class TestRedisClient(unittest.TestCase):
         self.client.list_remove("mykey", "val", count=2)
         self.mock_redis.lrem.assert_called_once_with("mykey", 2, "val")
 
+    def test_list_delete_by_index(self):
+        tombstone = "__TUIREDIS_DEL_TOMBSTONE__"
+        self.client.list_delete_by_index("mykey", 2)
+        self.mock_redis.lset.assert_called_once_with("mykey", 2, tombstone)
+        self.mock_redis.lrem.assert_called_once_with("mykey", 1, tombstone)
+
     def test_get_hash(self):
+        self.mock_redis.hlen.return_value = 1  # small hash → uses hgetall fast path
         self.mock_redis.hgetall.return_value = {"f1": "v1"}
         self.assertEqual(self.client.get_hash("mykey"), {"f1": "v1"})
 
@@ -270,6 +277,7 @@ class TestRedisClient(unittest.TestCase):
         self.mock_redis.hdel.assert_called_once_with("mykey", "f1", "f2")
 
     def test_get_set(self):
+        self.mock_redis.scard.return_value = 2  # small set → uses smembers fast path
         self.mock_redis.smembers.return_value = {"v1", "v2"}
         self.assertEqual(self.client.get_set("mykey"), {"v1", "v2"})
 
@@ -320,7 +328,7 @@ class TestRedisClient(unittest.TestCase):
         self.assertEqual(self.client.execute_command("HGETALL key"), "k: v")
 
         self.mock_redis.execute_command.return_value = True
-        self.assertEqual(self.client.execute_command("EXISTS key"), "OK")
+        self.assertEqual(self.client.execute_command("EXISTS key"), "1")
 
         self.mock_redis.execute_command.return_value = None
         self.assertEqual(self.client.execute_command("GET missing"), "(nil)")
@@ -342,6 +350,87 @@ class TestRedisClient(unittest.TestCase):
         self.assertEqual(self.client.connection_label, "🔒localhost:6379/db1")
         self.client.password = None
         self.assertEqual(self.client.connection_label, "localhost:6379/db1")
+
+    # ── New: key_exists ─────────────────────────────────────────
+
+    def test_key_exists_true(self):
+        self.mock_redis.exists.return_value = 1
+        self.assertTrue(self.client.key_exists("mykey"))
+        self.mock_redis.exists.assert_called_once_with("mykey")
+
+    def test_key_exists_false(self):
+        self.mock_redis.exists.return_value = 0
+        self.assertFalse(self.client.key_exists("missing"))
+
+    # ── New: count methods ───────────────────────────────────────
+
+    def test_get_list_count(self):
+        self.mock_redis.llen.return_value = 42
+        self.assertEqual(self.client.get_list_count("mykey"), 42)
+        self.mock_redis.llen.assert_called_once_with("mykey")
+
+    def test_get_hash_count(self):
+        self.mock_redis.hlen.return_value = 10
+        self.assertEqual(self.client.get_hash_count("mykey"), 10)
+        self.mock_redis.hlen.assert_called_once_with("mykey")
+
+    def test_get_set_count(self):
+        self.mock_redis.scard.return_value = 7
+        self.assertEqual(self.client.get_set_count("mykey"), 7)
+        self.mock_redis.scard.assert_called_once_with("mykey")
+
+    def test_get_zset_count(self):
+        self.mock_redis.zcard.return_value = 5
+        self.assertEqual(self.client.get_zset_count("mykey"), 5)
+        self.mock_redis.zcard.assert_called_once_with("mykey")
+
+    # ── New: display limits ──────────────────────────────────────
+
+    def test_get_list_default_limit(self):
+        """get_list() with default end should request at most DISPLAY_LIMIT rows."""
+        self.mock_redis.lrange.return_value = ["v1"]
+        self.client.get_list("mykey")
+        self.mock_redis.lrange.assert_called_once_with("mykey", 0, self.client.DISPLAY_LIMIT - 1)
+
+    def test_get_list_explicit_end(self):
+        """Callers may override end to get a specific range."""
+        self.mock_redis.lrange.return_value = ["v1", "v2"]
+        self.client.get_list("mykey", start=0, end=9)
+        self.mock_redis.lrange.assert_called_once_with("mykey", 0, 9)
+
+    def test_get_zset_default_limit(self):
+        self.mock_redis.zrange.return_value = [("v1", 1.0)]
+        self.client.get_zset("mykey")
+        self.mock_redis.zrange.assert_called_once_with(
+            "mykey", 0, self.client.DISPLAY_LIMIT - 1, withscores=True
+        )
+
+    def test_get_hash_large_uses_hscan(self):
+        """For hashes > DISPLAY_LIMIT, get_hash should use hscan (single page)."""
+        self.mock_redis.hlen.return_value = self.client.DISPLAY_LIMIT + 100
+        pairs = {f"f{i}": f"v{i}" for i in range(self.client.DISPLAY_LIMIT)}
+        # hscan returns (next_cursor, dict_of_pairs)
+        self.mock_redis.hscan.return_value = (0, pairs)
+        result = self.client.get_hash("mykey")
+        self.assertEqual(len(result), self.client.DISPLAY_LIMIT)
+        self.mock_redis.hscan.assert_called_once_with("mykey", cursor=0, count=self.client.DISPLAY_LIMIT)
+        self.mock_redis.hgetall.assert_not_called()
+
+    def test_get_set_large_uses_sscan(self):
+        """For sets > DISPLAY_LIMIT, get_set should use sscan (single page)."""
+        self.mock_redis.scard.return_value = self.client.DISPLAY_LIMIT + 50
+        members = [f"m{i}" for i in range(self.client.DISPLAY_LIMIT)]
+        # sscan returns (next_cursor, list_of_members)
+        self.mock_redis.sscan.return_value = (0, members)
+        result = self.client.get_set("mykey")
+        self.assertEqual(len(result), self.client.DISPLAY_LIMIT)
+        self.mock_redis.sscan.assert_called_once_with("mykey", cursor=0, count=self.client.DISPLAY_LIMIT)
+        self.mock_redis.smembers.assert_not_called()
+
+    def test_execute_command_bool_false_returns_zero(self):
+        """Boolean False (e.g. SETNX on existing key) should display as '0', not '(error)'."""
+        self.mock_redis.execute_command.return_value = False
+        self.assertEqual(self.client.execute_command("SETNX key val"), "0")
 
 
 if __name__ == "__main__":

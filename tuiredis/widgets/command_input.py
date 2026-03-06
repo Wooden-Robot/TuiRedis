@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import deque
+
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.message import Message
@@ -38,7 +40,7 @@ class CommandInput(Widget):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._history: list[str] = []
+        self._history: deque[str] = deque(maxlen=500)
         self._history_index: int = -1
 
     def compose(self) -> ComposeResult:
