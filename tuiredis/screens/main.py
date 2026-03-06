@@ -11,14 +11,77 @@ import sys
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.screen import Screen
-from textual.widgets import Footer, Header, Input, Select, Static, TabbedContent, TabPane
+from textual.screen import ModalScreen, Screen
+from textual.widgets import Button, Footer, Header, Input, Select, Static, TabbedContent, TabPane
 
 from tuiredis.screens.new_key_modal import NewKeyModal
 from tuiredis.widgets.key_detail import KeyDetail
 from tuiredis.widgets.key_tree import KeyTree
 from tuiredis.widgets.server_info import ServerInfo
 from tuiredis.widgets.value_viewer import ValueViewer
+
+
+class IRedisDbConfirm(ModalScreen):
+
+    DEFAULT_CSS = """
+    IRedisDbConfirm {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.7);
+    }
+    #iredis-db-card {
+        width: 60;
+        height: auto;
+        padding: 2;
+        background: $surface;
+        border: heavy #DC382D;
+    }
+    #iredis-db-card .dialog-title {
+        text-align: center;
+        text-style: bold;
+        color: #DC382D;
+        padding: 0 0 1 0;
+    }
+    #iredis-db-card .dialog-body {
+        padding: 0 0 1 0;
+    }
+    #iredis-db-btns {
+        height: auto;
+        align: right middle;
+        margin-top: 1;
+    }
+    #iredis-db-btns Button {
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self, old_db: int, new_db: int) -> None:
+        super().__init__()
+        self._old_db = old_db
+        self._new_db = new_db
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="iredis-db-card"):
+            yield Static("DB Changed", classes="dialog-title")
+            yield Static(
+                f"IRedis session is on DB {self._old_db}, "
+                f"but you switched to DB {self._new_db}.\n\n"
+                "Restart IRedis for the new DB?\n"
+                f"('Resume' keeps the old DB {self._old_db} session)",
+                classes="dialog-body",
+            )
+            with Horizontal(id="iredis-db-btns"):
+                yield Button("Resume", variant="default", id="iredis-db-resume")
+                yield Button(
+                    f"Restart (DB {self._new_db})",
+                    variant="primary",
+                    id="iredis-db-restart",
+                )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "iredis-db-resume":
+            self.dismiss(False)
+        elif event.button.id == "iredis-db-restart":
+            self.dismiss(True)
 
 
 class MainScreen(Screen):
@@ -28,6 +91,7 @@ class MainScreen(Screen):
         super().__init__(**kwargs)
         self._virtual_keys: dict[str, str] = {}
         self._iredis_proc: subprocess.Popen | None = None  # suspended iredis session
+        self._iredis_db: int | None = None  # DB index when iredis was started
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Prevent priority bindings from quitting when typing in an Input."""
@@ -264,11 +328,40 @@ class MainScreen(Screen):
 
     def action_open_iredis(self) -> None:
         """Launch iredis terminal."""
-        self._run_iredis()
+        client = self._get_client()
 
-    def _run_iredis(self) -> None:
+        # If there is a suspended iredis on a different DB, ask the user first
+        if self._iredis_proc is not None and self._iredis_db != client.db:
+            self.app.push_screen(
+                IRedisDbConfirm(self._iredis_db, client.db),
+                self._on_iredis_db_confirm,
+            )
+        else:
+            self._run_iredis()
+
+    def _on_iredis_db_confirm(self, restart: bool | None) -> None:
+        """Callback from IRedisDbConfirm dialog."""
+        self._run_iredis(force_restart=bool(restart))
+
+    def _run_iredis(self, force_restart: bool = False) -> None:
         iredis_bin = os.path.join(os.path.dirname(sys.executable), "iredis")
         client = self._get_client()
+
+        # If the user chose to restart for a DB change, kill the old process
+        if force_restart and self._iredis_proc is not None:
+            try:
+                os.kill(-self._iredis_proc.pid, signal.SIGTERM)
+                self._iredis_proc.wait(timeout=2)
+            except Exception:
+                try:
+                    os.kill(-self._iredis_proc.pid, signal.SIGKILL)
+                except Exception:
+                    pass
+            self._iredis_proc = None
+            self._iredis_db = None
+            _restarted_for_db = client.db
+        else:
+            _restarted_for_db = None
 
         kwargs = client.client.connection_pool.connection_kwargs
         actual_host = kwargs.get("host", client.host)
@@ -298,6 +391,7 @@ class MainScreen(Screen):
                     preexec_fn=os.setpgrp,  # new process group, pgid == proc.pid
                 )
                 self._iredis_proc = proc
+                self._iredis_db = client.db
 
             # Hand terminal control to iredis's process group
             # Ignore SIGTTOU so tcsetpgrp doesn't block us while we're "background"
@@ -335,6 +429,9 @@ class MainScreen(Screen):
             status_bar.update("[dim]IRedis session suspended — Ctrl+T to resume[/]")
         else:
             status_bar.update("")
+
+        if _restarted_for_db is not None:
+            self.notify(f"♻️ IRedis restarted (DB changed → DB {_restarted_for_db})", timeout=3)
 
     def action_quit(self) -> None:
         client = self._get_client()
