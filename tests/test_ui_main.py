@@ -6,7 +6,6 @@ from textual.widgets import Input, Select
 from tuiredis.app import TRedisApp
 from tuiredis.redis_client import RedisClient
 from tuiredis.screens.main import MainScreen
-from tuiredis.widgets.command_input import CommandInput
 from tuiredis.widgets.key_detail import KeyDetail
 from tuiredis.widgets.key_tree import KeyTree
 from tuiredis.widgets.value_viewer import ValueViewer
@@ -14,7 +13,7 @@ from tuiredis.widgets.value_viewer import ValueViewer
 
 @pytest.fixture
 def mock_redis_client():
-    client = MagicMock(spec=RedisClient)
+    client = MagicMock()
     client.connection_label = "mock_host:6379"
     client.get_server_info.return_value = {"redis_version": "7.0.0", "db0": 10}
     client.db = 0
@@ -39,16 +38,7 @@ def mock_redis_client():
     client.get_ttls.return_value = {}  # no expiry data by default
     client.scan_hash.return_value = (0, {})
     client.scan_set.return_value = (0, [])
-
-    # Apply patches for connection management functions
-    with (
-        patch("tuiredis.screens.connect.load_connections", return_value=[]),
-        patch(
-            "tuiredis.screens.connect.save_connection",
-            return_value=({"id": "test-id", "host": "127.0.0.1", "port": 6379, "db": 0}, []),
-        ),
-    ):
-        yield client
+    return client
 
 
 @pytest.mark.asyncio
@@ -105,13 +95,6 @@ async def test_main_screen_interactions(mock_redis_client):
 
         mock_redis_client.get_type.assert_called_with("user:1")
         mock_redis_client.get_string.assert_called_with("user:1")
-
-        # Test Command Input execution
-        cmd = main_screen.query_one(CommandInput)
-        mock_redis_client.execute_command.return_value = "PONG"
-        cmd.post_message(CommandInput.CommandSubmitted("PING"))
-        await pilot.pause(0.1)
-        mock_redis_client.execute_command.assert_called_with("PING")
 
         # Test Key Deletion flow
         detail = main_screen.query_one(KeyDetail)

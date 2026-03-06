@@ -21,7 +21,6 @@ from tuiredis.widgets.server_info import ServerInfo
 from tuiredis.widgets.value_viewer import ValueViewer
 
 
-
 class MainScreen(Screen):
     """Main workspace screen with key browser, value viewer, and console."""
 
