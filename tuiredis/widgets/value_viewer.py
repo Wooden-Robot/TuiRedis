@@ -163,7 +163,7 @@ class ValueViewer(Widget):
         self.query("*").remove()
         self.mount(Vertical(Static("Select a key to view its value", classes="vv-empty", id="vv-placeholder")))
 
-    async def show_value(self, key: str, value_type: str, data, total_count: int | None = None):
+    async def show_value(self, key: str, value_type: str, data, total_count: int | None = None, cursor: int = 0):
         """Display the value for a given key.
 
         Args:
@@ -171,6 +171,7 @@ class ValueViewer(Widget):
             value_type: One of "string", "list", "hash", "set", "zset".
             data: The value data from the client.
             total_count: Actual number of elements in Redis (may exceed what is displayed).
+            cursor: HSCAN/SSCAN cursor for hash/set pagination.
         """
         self._current_key = key
         self._current_type = value_type
@@ -180,6 +181,10 @@ class ValueViewer(Widget):
         self._displayed_count = len(data) if data else 0
         self._hash_cursor = 0
         self._set_cursor = 0
+        if value_type == "hash":
+            self._hash_cursor = cursor
+        elif value_type == "set":
+            self._set_cursor = cursor
 
         await self.query("*").remove()
 

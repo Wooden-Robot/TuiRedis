@@ -416,6 +416,13 @@ class TestRedisClient(unittest.TestCase):
         self.mock_redis.hscan.assert_called_once_with("mykey", cursor=0, count=self.client.DISPLAY_LIMIT)
         self.mock_redis.hgetall.assert_not_called()
 
+    def test_get_hash_page_returns_cursor_and_pairs(self):
+        self.mock_redis.hscan.return_value = (7, {"f1": "v1"})
+        cursor, pairs = self.client.get_hash_page("mykey", cursor=3, count=25)
+        self.assertEqual(cursor, 7)
+        self.assertEqual(pairs, {"f1": "v1"})
+        self.mock_redis.hscan.assert_called_once_with("mykey", cursor=3, count=25)
+
     def test_get_set_large_uses_sscan(self):
         """For sets > DISPLAY_LIMIT, get_set should use sscan (single page)."""
         self.mock_redis.scard.return_value = self.client.DISPLAY_LIMIT + 50
@@ -426,6 +433,13 @@ class TestRedisClient(unittest.TestCase):
         self.assertEqual(len(result), self.client.DISPLAY_LIMIT)
         self.mock_redis.sscan.assert_called_once_with("mykey", cursor=0, count=self.client.DISPLAY_LIMIT)
         self.mock_redis.smembers.assert_not_called()
+
+    def test_get_set_page_returns_cursor_and_members(self):
+        self.mock_redis.sscan.return_value = (9, ["a", "b"])
+        cursor, members = self.client.get_set_page("mykey", cursor=2, count=15)
+        self.assertEqual(cursor, 9)
+        self.assertEqual(members, ["a", "b"])
+        self.mock_redis.sscan.assert_called_once_with("mykey", cursor=2, count=15)
 
     def test_execute_command_bool_false_returns_zero(self):
         """Boolean False (e.g. SETNX on existing key) should display as '0', not '(error)'."""

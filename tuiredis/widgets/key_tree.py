@@ -80,8 +80,9 @@ class KeyTree(Tree):
         ttl_map: dict[str, int] | None = None,
     ) -> None:
         """Append new keys (from pagination) and rebuild the tree."""
-        self._keys.extend(keys)
-        self._keys_set.update(keys)
+        new_keys = [key for key in keys if key not in self._keys_set]
+        self._keys.extend(new_keys)
+        self._keys_set.update(new_keys)
         self._key_types.update(key_types)
         if ttl_map:
             self._ttl_map.update(ttl_map)

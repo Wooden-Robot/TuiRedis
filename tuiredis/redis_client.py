@@ -268,6 +268,13 @@ class RedisClient:
         result.update(pairs)
         return result
 
+    def get_hash_page(self, key: str, cursor: int = 0, count: int | None = None) -> tuple[int, dict[str, str]]:
+        """Return a hash page and next cursor using HSCAN."""
+        if count is None:
+            count = self.DISPLAY_LIMIT
+        next_cursor, pairs = self.client.hscan(key, cursor=cursor, count=count)
+        return int(next_cursor), dict(pairs)
+
     def scan_hash(self, key: str, cursor: int = 0, count: int = 500) -> tuple[int, dict[str, str]]:
         """Return (next_cursor, {field: value}) using HSCAN.
         cursor=0 to start; returns cursor=0 when scan is complete.
@@ -292,6 +299,13 @@ class RedisClient:
         _, members = self.client.sscan(key, cursor=0, count=self.DISPLAY_LIMIT)
         result.update(members)
         return result
+
+    def get_set_page(self, key: str, cursor: int = 0, count: int | None = None) -> tuple[int, list[str]]:
+        """Return a set page and next cursor using SSCAN."""
+        if count is None:
+            count = self.DISPLAY_LIMIT
+        next_cursor, members = self.client.sscan(key, cursor=cursor, count=count)
+        return int(next_cursor), list(members)
 
     def scan_set(self, key: str, cursor: int = 0, count: int = 500) -> tuple[int, list[str]]:
         """Return (next_cursor, [member, ...]) using SSCAN."""

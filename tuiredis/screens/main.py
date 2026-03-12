@@ -248,6 +248,8 @@ class MainScreen(Screen):
                 if v_key not in keys:
                     keys.append(v_key)
 
+        keys = list(dict.fromkeys(keys))
+
         # Get types for all keys (optimized batch)
         key_types = client.get_types(keys)
 
@@ -539,8 +541,8 @@ class MainScreen(Screen):
 
         # Show value
         viewer = self.query_one("#value-viewer", ValueViewer)
-        data, total_count = self._get_value(key, key_type)
-        await viewer.show_value(key, key_type, data, total_count=total_count)
+        data, total_count, cursor = self._get_value(key, key_type)
+        await viewer.show_value(key, key_type, data, total_count=total_count, cursor=cursor)
 
         # Show detail
         detail = self.query_one("#key-detail", KeyDetail)
@@ -554,19 +556,27 @@ class MainScreen(Screen):
         tabs.active = "tab-value"
 
     def _get_value(self, key: str, key_type: str) -> tuple:
-        """Return (data, total_count). total_count is None for string keys."""
+        """Return (data, total_count, cursor). total_count is None for string keys."""
         client = self._get_client()
         if key_type == "string":
-            return client.get_string(key), None
+            return client.get_string(key), None, 0
         elif key_type == "list":
-            return client.get_list(key), client.get_list_count(key)
+            return client.get_list(key), client.get_list_count(key), 0
         elif key_type == "hash":
-            return client.get_hash(key), client.get_hash_count(key)
+            total = client.get_hash_count(key)
+            if total <= client.DISPLAY_LIMIT:
+                return client.get_hash(key), total, 0
+            next_cursor, data = client.get_hash_page(key, cursor=0)
+            return data, total, next_cursor
         elif key_type == "set":
-            return client.get_set(key), client.get_set_count(key)
+            total = client.get_set_count(key)
+            if total <= client.DISPLAY_LIMIT:
+                return client.get_set(key), total, 0
+            next_cursor, data = client.get_set_page(key, cursor=0)
+            return data, total, next_cursor
         elif key_type == "zset":
-            return client.get_zset(key), client.get_zset_count(key)
-        return None, None
+            return client.get_zset(key), client.get_zset_count(key), 0
+        return None, None, 0
 
     # ── Value Viewer Messages ────────────────────────────────────
 
@@ -596,9 +606,9 @@ class MainScreen(Screen):
 
             # Refresh the view
             key_type = client.get_type(event.key)
-            data, total_count = self._get_value(event.key, key_type)
+            data, total_count, cursor = self._get_value(event.key, key_type)
             viewer = self.query_one("#value-viewer", ValueViewer)
-            await viewer.show_value(event.key, key_type, data, total_count=total_count)
+            await viewer.show_value(event.key, key_type, data, total_count=total_count, cursor=cursor)
             self.notify(f"✅ Saved to {event.key}", timeout=2)
         except Exception as e:
             self.notify(f"⚠️ Edit failed: {e}", severity="error", timeout=4)
@@ -628,9 +638,9 @@ class MainScreen(Screen):
                 self.query_one("#value-viewer", ValueViewer).show_empty()
                 self._load_keys()
             else:
-                data, total_count = self._get_value(event.key, key_type)
+                data, total_count, cursor = self._get_value(event.key, key_type)
                 viewer = self.query_one("#value-viewer", ValueViewer)
-                await viewer.show_value(event.key, key_type, data, total_count=total_count)
+                await viewer.show_value(event.key, key_type, data, total_count=total_count, cursor=cursor)
             self.notify(f"🗑️ Deleted from {event.key}", timeout=2)
         except Exception as e:
             self.notify(f"⚠️ Delete failed: {e}", severity="error", timeout=4)
@@ -693,9 +703,9 @@ class MainScreen(Screen):
 
         # Re-open the renamed key in the value viewer
         key_type = client.get_type(event.new_key)
-        data, total_count = self._get_value(event.new_key, key_type)
+        data, total_count, cursor = self._get_value(event.new_key, key_type)
         viewer = self.query_one("#value-viewer", ValueViewer)
-        await viewer.show_value(event.new_key, key_type, data, total_count=total_count)
+        await viewer.show_value(event.new_key, key_type, data, total_count=total_count, cursor=cursor)
 
         detail = self.query_one("#key-detail", KeyDetail)
         ttl = client.get_ttl(event.new_key)
@@ -709,5 +719,3 @@ class MainScreen(Screen):
         self.notify(f"⏱️  TTL set to {event.ttl}s for {event.key}", timeout=2)
 
     # ── New Key Dialog ───────────────────────────────────────────
-
-
