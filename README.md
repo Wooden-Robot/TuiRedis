@@ -4,7 +4,7 @@
 
 A beautiful, high-performance Redis Terminal UI built with Python & [Textual](https://textual.textualize.io/).
 
-[English](README.md) | [中文说明](README_zh-CN.md)
+[English](README.md) | [中文说明](README_zh-CN.md) | [Changelog](CHANGELOG.md) | [更新记录](CHANGELOG_zh-CN.md)
 
 <br>
 <img src="./docs/imgs/1.png" alt="TuiRedis Main View" width="800">
@@ -32,6 +32,12 @@ A beautiful, high-performance Redis Terminal UI built with Python & [Textual](ht
 - **✨ CRUD Operations** — Create, Read, Update, Delete keys seamlessly.
 - **🎨 Modern Dark Theme** — Redis-branded aesthetics with fluid terminal animations.
 - **🛠️ IRedis Integration** — Press `Ctrl+T` to jump into an `iredis` interactive session. Press `Ctrl+Z` inside iredis to suspend it and return to TuiRedis instantly; press `Ctrl+T` again to resume the same session where you left off.
+
+### What's New In v0.7.0
+- Added Redis Sentinel master discovery with multi-Sentinel support and failover-aware reconnect/retry logic.
+- Added explicit Redis Cluster mode with cross-cluster key scanning, aggregated server info, and safer command handling.
+- Hardened the UI with async background loading, loading indicators, stale-response dropping, and safer DB switching.
+- Improved connection profile safety by defaulting to non-persistent secrets and surfacing profile save/delete failures.
 
 ### 📦 Installation
 TuiRedis is available on PyPI and can be installed using your preferred Python package manager.

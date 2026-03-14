@@ -4,7 +4,7 @@
 
 一款基于 Python & [Textual](https://textual.textualize.io/) 构建的、美观且高性能的 Redis 终端可视化管理工具。
 
-[English](README.md) | [中文说明](README_zh-CN.md)
+[English](README.md) | [中文说明](README_zh-CN.md) | [Changelog](CHANGELOG.md) | [更新记录](CHANGELOG_zh-CN.md)
 
 <br>
 <img src="./docs/imgs/1.png" alt="TuiRedis 主要视图" width="800">
@@ -32,6 +32,12 @@
 - **✨ 全功能 CRUD** — 无缝创建、读取、更新和删除键值。
 - **🎨 现代暗黑主题** — 沉浸式的终端 UI 体验及顺滑的动画交互。
 - **🛠️ IRedis 强强联合** — 按 `Ctrl+T` 一键进入 `iredis` 交互式会话；在 iredis 中按 `Ctrl+Z` 即可挂起并立刻返回 TuiRedis；再次按 `Ctrl+T` 可悍美恢复上次的 iredis 会话记录不丢失。
+
+### v0.7.0 更新摘要
+- 新增 Redis Sentinel 主库发现能力，支持多 Sentinel 节点和故障切换后的自动重连/重试。
+- 新增显式 Redis Cluster 模式，支持跨集群 Key 扫描、聚合服务器信息和更安全的命令处理。
+- 强化主界面异步交互，补齐 loading 提示、过期响应丢弃和更稳的 DB 切换行为。
+- 强化连接配置安全性，默认不落盘密码，并对保存/删除配置失败给出明确反馈。
 
 ### 📦 安装指南
 TuiRedis 已经发布至 PyPI，您可以使用常用的 Python 包管理工具进行安装。
