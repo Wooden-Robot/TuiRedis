@@ -305,19 +305,6 @@ class ValueViewer(Widget):
             if data:
                 for i, (member, score) in enumerate(data, 1):
                     table.add_row(str(i), str(member), str(score), key=str(member))
-            add_row = Vertical(
-                Horizontal(
-                    Input(placeholder="Member", id="vv-zset-mem"),
-                    Input(placeholder="Score (number)", id="vv-zset-score"),
-                ),
-                Horizontal(
-                    Button("Save / Add", variant="success", id="vv-save-zset"),
-                    Button("✕ Clear", id="vv-clear-selection"),
-                    Button("Delete", variant="error", id="vv-delete-zset"),
-                    classes="vv-add-buttons",
-                ),
-                id="vv-add-row",
-            )
             zset_children = [header, table]
             if isinstance(total_count, int) and self._displayed_count < total_count:
                 remaining = total_count - self._displayed_count

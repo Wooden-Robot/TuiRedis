@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,11 +16,14 @@ from tuiredis.widgets.value_viewer import ValueViewer
 def mock_redis_client():
     client = MagicMock()
     client.connection_label = "mock_host:6379"
+    client.use_cluster = False
+    client.use_sentinel = False
     client.get_server_info.return_value = {"redis_version": "7.0.0", "db0": 10}
     client.db = 0
     client.password = None
     client.get_db_size.return_value = 10
     client.get_keyspace_info.return_value = {0: 10, 1: 5}
+    client.get_database_count.return_value = 16
     client.scan_keys_paginated.return_value = (0, ["user:1", "user:2"])
     client.get_types.return_value = {"user:1": "string", "user:2": "hash"}
     client.get_type.return_value = "string"
@@ -109,6 +113,127 @@ async def test_main_screen_interactions(mock_redis_client):
 
 
 @pytest.mark.asyncio
+async def test_main_screen_db_switch_failure_keeps_original_selection(mock_redis_client):
+    mock_redis_client.db = 0
+    mock_redis_client.switch_db.return_value = False
+
+    app = TRedisApp()
+    app.redis_client = mock_redis_client
+    app.redis_client.is_connected = True
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.push_screen("main")
+        await pilot.pause(0.1)
+
+        main_screen = app.screen
+        db_select = main_screen.query_one("#db-select", Select)
+        db_select.value = "1"
+        await pilot.pause(0.1)
+
+        mock_redis_client.switch_db.assert_called_with(1)
+        assert db_select.value == "0"
+
+
+@pytest.mark.asyncio
+async def test_main_screen_open_iredis_reports_missing_binary(mock_redis_client):
+    app = TRedisApp()
+    app.redis_client = mock_redis_client
+    app.redis_client.is_connected = True
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.push_screen("main")
+        await pilot.pause(0.1)
+
+        main_screen = app.screen
+        with patch("tuiredis.screens.main.os.path.exists", return_value=False):
+            main_screen.action_open_iredis()
+        await pilot.pause(0.1)
+
+        assert main_screen._iredis_proc is None
+
+
+@pytest.mark.asyncio
+async def test_main_screen_db_options_expand_to_server_database_count(mock_redis_client):
+    mock_redis_client.db = 20
+    mock_redis_client.get_database_count.return_value = 32
+    mock_redis_client.get_keyspace_info.return_value = {0: 10, 20: 3, 31: 1}
+
+    app = TRedisApp()
+    app.redis_client = mock_redis_client
+    app.redis_client.is_connected = True
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.push_screen("main")
+        await pilot.pause(0.1)
+
+        main_screen = app.screen
+        db_select = main_screen.query_one("#db-select", Select)
+        assert db_select.value == "20"
+        assert len(db_select._options) == 32
+
+
+@pytest.mark.asyncio
+async def test_main_screen_cluster_mode_disables_db_switch(mock_redis_client):
+    mock_redis_client.get_server_info.return_value = {"redis_version": "7.0.0", "redis_mode": "cluster"}
+
+    app = TRedisApp()
+    app.redis_client = mock_redis_client
+    app.redis_client.is_connected = True
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.push_screen("main")
+        await pilot.pause(0.2)
+
+        main_screen = app.screen
+        db_select = main_screen.query_one("#db-select", Select)
+        assert db_select.disabled is True
+
+
+@pytest.mark.asyncio
+async def test_main_screen_cluster_connection_starts_with_single_db_option(mock_redis_client):
+    mock_redis_client.use_cluster = True
+    mock_redis_client.get_database_count.return_value = 1
+    mock_redis_client.get_server_info.return_value = {"redis_version": "7.0.0", "redis_mode": "cluster"}
+
+    app = TRedisApp()
+    app.redis_client = mock_redis_client
+    app.redis_client.is_connected = True
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.push_screen("main")
+        await pilot.pause(0.05)
+
+        main_screen = app.screen
+        db_select = main_screen.query_one("#db-select", Select)
+        assert db_select.disabled is True
+        assert db_select.value == "0"
+        assert len(db_select._options) == 1
+
+
+@pytest.mark.asyncio
+async def test_main_screen_sentinel_mode_disables_browsing(mock_redis_client):
+    mock_redis_client.get_server_info.return_value = {"redis_version": "7.0.0", "redis_mode": "sentinel"}
+    mock_redis_client.scan_keys_paginated.side_effect = AssertionError("scan should not run in sentinel mode")
+
+    app = TRedisApp()
+    app.redis_client = mock_redis_client
+    app.redis_client.is_connected = True
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.push_screen("main")
+        await pilot.pause(0.2)
+
+        main_screen = app.screen
+        db_select = main_screen.query_one("#db-select", Select)
+        tree = main_screen.query_one(KeyTree)
+        viewer = main_screen.query_one(ValueViewer)
+
+        assert db_select.disabled is True
+        assert len(tree.root.children) == 0
+        assert viewer._current_key is None
+
+
+@pytest.mark.asyncio
 async def test_main_screen_value_viewer_events(mock_redis_client):
     app = TRedisApp()
     app.redis_client = mock_redis_client
@@ -150,6 +275,75 @@ async def test_main_screen_value_viewer_events(mock_redis_client):
         viewer.post_message(ValueViewer.MemberDeleted("mylist", "list", (None, "old_item")))
         await pilot.pause(0.1)
         mock_redis_client.list_remove.assert_called_with("mylist", "old_item", 1)
+
+
+@pytest.mark.asyncio
+async def test_main_screen_stale_key_selection_does_not_override_latest(mock_redis_client):
+    app = TRedisApp()
+    app.redis_client = mock_redis_client
+    app.redis_client.is_connected = True
+
+    slow_request_gate = asyncio.Event()
+
+    async def fake_to_thread(func, *args, **kwargs):
+        if getattr(func, "__name__", "") == "_fetch_key_details_payload":
+            key = args[0]
+            if key == "user:1":
+                await slow_request_gate.wait()
+                return ("string", "stale-value", None, 0, -1, "raw", 1)
+            if key == "user:2":
+                return ("string", "fresh-value", None, 0, -1, "raw", 2)
+        return func(*args, **kwargs)
+
+    with patch("tuiredis.screens.main.asyncio.to_thread", side_effect=fake_to_thread):
+        async with app.run_test(size=(120, 40)) as pilot:
+            app.push_screen("main")
+            await pilot.pause(0.1)
+            main_screen = app.screen
+            viewer = main_screen.query_one(ValueViewer)
+
+            stale_task = asyncio.create_task(main_screen.on_key_tree_key_selected(KeyTree.KeySelected("user:1")))
+            await pilot.pause(0.05)
+            fresh_task = asyncio.create_task(main_screen.on_key_tree_key_selected(KeyTree.KeySelected("user:2")))
+            await pilot.pause(0.05)
+
+            slow_request_gate.set()
+            await asyncio.gather(stale_task, fresh_task)
+            await pilot.pause(0.1)
+
+            assert viewer._current_key == "user:2"
+            assert viewer._current_raw_data == "fresh-value"
+
+
+@pytest.mark.asyncio
+async def test_main_screen_shows_loading_status_during_key_detail_fetch(mock_redis_client):
+    app = TRedisApp()
+    app.redis_client = mock_redis_client
+    app.redis_client.is_connected = True
+
+    slow_request_gate = asyncio.Event()
+
+    async def fake_to_thread(func, *args, **kwargs):
+        if getattr(func, "__name__", "") == "_fetch_key_details_payload":
+            await slow_request_gate.wait()
+            return ("string", "value", None, 0, -1, "raw", 1)
+        return func(*args, **kwargs)
+
+    with patch("tuiredis.screens.main.asyncio.to_thread", side_effect=fake_to_thread):
+        async with app.run_test(size=(120, 40)) as pilot:
+            app.push_screen("main")
+            await pilot.pause(0.1)
+            main_screen = app.screen
+
+            task = asyncio.create_task(main_screen.on_key_tree_key_selected(KeyTree.KeySelected("user:1")))
+            await pilot.pause(0.05)
+            status_bar = main_screen.query_one("#status-bar")
+            assert "Loading user:1..." in str(status_bar.render())
+
+            slow_request_gate.set()
+            await task
+            await pilot.pause(0.05)
+            assert str(status_bar.render()) == ""
 
 
 @pytest.mark.asyncio

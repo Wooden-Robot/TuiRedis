@@ -151,8 +151,25 @@ class ConnectScreen(Screen):
         margin: 1 0 0 0;
         padding: 1 0 0 0;
     }
+    ConnectScreen #sentinel-card {
+        display: none;
+        height: auto;
+        border-top: tall $surface-lighten-2;
+        margin: 1 0 0 0;
+        padding: 1 0 0 0;
+    }
+    ConnectScreen #sentinel-card.visible {
+        display: block;
+    }
     ConnectScreen #ssh-card.visible {
         display: block;
+    }
+    ConnectScreen #sentinel-row {
+        height: auto;
+        margin: 0;
+    }
+    ConnectScreen #sentinel-row Input {
+        width: 1fr;
     }
     ConnectScreen #ssh-row {
         height: auto;
@@ -213,6 +230,23 @@ class ConnectScreen(Screen):
                             yield Input(value="0", placeholder="DB", id="db-input", type="integer")
                         yield Static("Password", classes="form-label")
                         yield Input(placeholder="(optional)", password=True, id="password-input")
+                        yield Checkbox("Save passwords to disk", id="save-secrets-checkbox")
+                        yield Checkbox("Use Redis Cluster", id="use-cluster-checkbox")
+
+                        yield Checkbox("Use Redis Sentinel", id="use-sentinel-checkbox")
+                        with Vertical(id="sentinel-card"):
+                            yield Static("Sentinel Host & Port", classes="form-label")
+                            with Horizontal(id="sentinel-row"):
+                                yield Input(placeholder="Sentinel host", id="sentinel-host-input")
+                                yield Input(value="26379", placeholder="Port", id="sentinel-port-input", type="integer")
+                            yield Input(
+                                placeholder="Optional nodes: host1:26379,host2:26379",
+                                id="sentinel-nodes-input",
+                            )
+                            yield Static("Master Name", classes="form-label")
+                            yield Input(placeholder="e.g. mymaster", id="sentinel-master-input")
+                            yield Static("Sentinel Password", classes="form-label")
+                            yield Input(placeholder="(optional)", password=True, id="sentinel-password-input")
 
                         yield Checkbox("Use SSH Tunnel", id="use-ssh-checkbox")
                         with Vertical(id="ssh-card"):
@@ -269,6 +303,21 @@ class ConnectScreen(Screen):
             self.query_one("#port-input", Input).value = str(profile.get("port", "6379"))
             self.query_one("#db-input", Input).value = str(profile.get("db", "0"))
             self.query_one("#password-input", Input).value = profile.get("password") or ""
+            self.query_one("#save-secrets-checkbox", Checkbox).value = bool(
+                profile.get("save_secrets")
+                or profile.get("password")
+                or profile.get("sentinel_password")
+                or profile.get("ssh_password")
+            )
+            self.query_one("#use-cluster-checkbox", Checkbox).value = profile.get("use_cluster", False)
+            use_sentinel = profile.get("use_sentinel", False)
+            sentinel_checkbox = self.query_one("#use-sentinel-checkbox", Checkbox)
+            sentinel_checkbox.value = use_sentinel
+            self.query_one("#sentinel-host-input", Input).value = profile.get("sentinel_host") or ""
+            self.query_one("#sentinel-port-input", Input).value = str(profile.get("sentinel_port") or 26379)
+            self.query_one("#sentinel-nodes-input", Input).value = profile.get("sentinel_nodes") or ""
+            self.query_one("#sentinel-master-input", Input).value = profile.get("sentinel_master_name") or ""
+            self.query_one("#sentinel-password-input", Input).value = profile.get("sentinel_password") or ""
 
             use_ssh = profile.get("use_ssh", False)
             checkbox = self.query_one("#use-ssh-checkbox", Checkbox)
@@ -302,6 +351,14 @@ class ConnectScreen(Screen):
         self.query_one("#port-input", Input).value = "6379"
         self.query_one("#db-input", Input).value = "0"
         self.query_one("#password-input", Input).value = ""
+        self.query_one("#save-secrets-checkbox", Checkbox).value = False
+        self.query_one("#use-cluster-checkbox", Checkbox).value = False
+        self.query_one("#use-sentinel-checkbox", Checkbox).value = False
+        self.query_one("#sentinel-host-input", Input).value = ""
+        self.query_one("#sentinel-port-input", Input).value = "26379"
+        self.query_one("#sentinel-nodes-input", Input).value = ""
+        self.query_one("#sentinel-master-input", Input).value = ""
+        self.query_one("#sentinel-password-input", Input).value = ""
 
         checkbox = self.query_one("#use-ssh-checkbox", Checkbox)
         checkbox.value = False
@@ -343,6 +400,12 @@ class ConnectScreen(Screen):
                 ssh_card.add_class("visible")
             else:
                 ssh_card.remove_class("visible")
+        elif event.checkbox.id == "use-sentinel-checkbox":
+            sentinel_card = self.query_one("#sentinel-card")
+            if event.value:
+                sentinel_card.add_class("visible")
+            else:
+                sentinel_card.remove_class("visible")
 
     def _build_profile_from_inputs(self) -> ConnectionProfile:
         name = self.query_one("#profile-name-input", Input).value.strip() or ""
@@ -350,6 +413,9 @@ class ConnectScreen(Screen):
         port_str = self.query_one("#port-input", Input).value.strip() or "6379"
         db_str = self.query_one("#db-input", Input).value.strip() or "0"
         password = self.query_one("#password-input", Input).value
+        save_secrets = self.query_one("#save-secrets-checkbox", Checkbox).value
+        use_cluster = self.query_one("#use-cluster-checkbox", Checkbox).value
+        use_sentinel = self.query_one("#use-sentinel-checkbox", Checkbox).value
         use_ssh = self.query_one("#use-ssh-checkbox", Checkbox).value
 
         try:
@@ -366,6 +432,21 @@ class ConnectScreen(Screen):
         ssh_user = None
         ssh_password = None
         ssh_private_key = None
+        sentinel_host = None
+        sentinel_port = 26379
+        sentinel_nodes = None
+        sentinel_master_name = None
+        sentinel_password = None
+
+        if use_sentinel:
+            sentinel_host = self.query_one("#sentinel-host-input", Input).value.strip() or None
+            try:
+                sentinel_port = int(self.query_one("#sentinel-port-input", Input).value.strip() or "26379")
+            except ValueError:
+                sentinel_port = 26379
+            sentinel_nodes = self.query_one("#sentinel-nodes-input", Input).value.strip() or None
+            sentinel_master_name = self.query_one("#sentinel-master-input", Input).value.strip() or None
+            sentinel_password = self.query_one("#sentinel-password-input", Input).value or None
 
         if use_ssh:
             ssh_host = self.query_one("#ssh-host-input", Input).value.strip() or None
@@ -383,6 +464,14 @@ class ConnectScreen(Screen):
             "port": port,
             "db": db,
             "password": password or None,
+            "save_secrets": save_secrets,
+            "use_cluster": use_cluster,
+            "use_sentinel": use_sentinel,
+            "sentinel_nodes": sentinel_nodes,
+            "sentinel_host": sentinel_host,
+            "sentinel_port": sentinel_port,
+            "sentinel_master_name": sentinel_master_name,
+            "sentinel_password": sentinel_password,
             "use_ssh": use_ssh,
             "ssh_host": ssh_host,
             "ssh_port": ssh_port,
@@ -396,16 +485,49 @@ class ConnectScreen(Screen):
 
         return profile
 
+    @staticmethod
+    def _profile_for_storage(profile: ConnectionProfile) -> ConnectionProfile:
+        """Return a copy of the profile safe for disk persistence."""
+        stored = dict(profile)
+        if not stored.get("save_secrets"):
+            stored["password"] = None
+            stored["sentinel_password"] = None
+            stored["ssh_password"] = None
+        return stored
+
     async def _do_save(self) -> None:
         profile = self._build_profile_from_inputs()
-        saved_profile, _ = save_connection(profile)
+        validation_error = self._validate_profile(profile)
+        if validation_error:
+            error_label = self.query_one("#connect-error", Static)
+            error_label.update(f"⚠️ {validation_error}")
+            error_label.add_class("visible")
+            return
+
+        saved_profile, _, persisted = save_connection(self._profile_for_storage(profile))
+        error_label = self.query_one("#connect-error", Static)
+        if not persisted:
+            error_label.update("❌ Failed to save connection profile")
+            error_label.add_class("visible")
+            return
+
+        error_label.update("")
+        error_label.remove_class("visible")
         # Use the returned profile directly — its ID is guaranteed to be correct
         self.current_profile_id = saved_profile.get("id")
         await self._refresh_history()
 
     async def _do_delete(self) -> None:
         if self.current_profile_id:
-            delete_connection(self.current_profile_id)
+            _, persisted = delete_connection(self.current_profile_id)
+            error_label = self.query_one("#connect-error", Static)
+            if not persisted:
+                error_label.update("❌ Failed to delete connection profile")
+                error_label.add_class("visible")
+                return
+
+            error_label.update("")
+            error_label.remove_class("visible")
             self._clear_form()
             await self._refresh_history()
 
@@ -449,8 +571,49 @@ class ConnectScreen(Screen):
             return f"Port must be an integer between 1 and 65535 (got {port!r})"
 
         db = profile.get("db")
-        if not isinstance(db, int) or not (0 <= db <= 15):
-            return f"DB must be between 0 and 15 (got {db!r})"
+        if not isinstance(db, int) or db < 0:
+            return f"DB must be a non-negative integer (got {db!r})"
+
+        if profile.get("use_cluster"):
+            if profile.get("db") not in (0, None):
+                return "Redis Cluster only supports DB 0"
+            if profile.get("use_sentinel"):
+                return "Redis Cluster cannot be used together with Redis Sentinel"
+            if profile.get("use_ssh"):
+                return "Redis Cluster cannot be used together with SSH tunnel yet"
+
+        if profile.get("use_sentinel"):
+            sentinel_nodes = (profile.get("sentinel_nodes") or "").strip()
+            sentinel_host = (profile.get("sentinel_host") or "").strip()
+            if sentinel_nodes:
+                for raw_node in sentinel_nodes.split(","):
+                    node = raw_node.strip()
+                    if not node:
+                        continue
+                    host_part = node
+                    port_part = profile.get("sentinel_port", 26379)
+                    if ":" in node:
+                        host_part, port_str = node.rsplit(":", 1)
+                        try:
+                            port_part = int(port_str)
+                        except ValueError:
+                            return f"Sentinel node {node!r} has an invalid port"
+                    if not self._is_valid_host(host_part.strip()):
+                        return f"Sentinel node host {host_part!r} is not a valid IP address or hostname"
+                    if not isinstance(port_part, int) or not (1 <= port_part <= 65535):
+                        return f"Sentinel node port must be between 1 and 65535 (got {port_part!r})"
+            elif not sentinel_host:
+                return "Sentinel Host cannot be empty when Redis Sentinel is enabled"
+            elif not self._is_valid_host(sentinel_host):
+                return f"Sentinel Host {sentinel_host!r} is not a valid IP address or hostname"
+            sentinel_port = profile.get("sentinel_port", 26379)
+            if not isinstance(sentinel_port, int) or not (1 <= sentinel_port <= 65535):
+                return f"Sentinel Port must be between 1 and 65535 (got {sentinel_port!r})"
+            master_name = (profile.get("sentinel_master_name") or "").strip()
+            if not master_name:
+                return "Sentinel Master Name cannot be empty when Redis Sentinel is enabled"
+            if profile.get("use_ssh"):
+                return "Redis Sentinel cannot be used together with SSH tunnel yet"
 
         if profile.get("use_ssh"):
             ssh_host = (profile.get("ssh_host") or "").strip()
@@ -491,6 +654,13 @@ class ConnectScreen(Screen):
             port=profile["port"],
             password=profile.get("password"),
             db=profile["db"],
+            use_cluster=profile.get("use_cluster", False),
+            use_sentinel=profile.get("use_sentinel", False),
+            sentinel_nodes=profile.get("sentinel_nodes"),
+            sentinel_host=profile.get("sentinel_host"),
+            sentinel_port=profile.get("sentinel_port", 26379),
+            sentinel_master_name=profile.get("sentinel_master_name"),
+            sentinel_password=profile.get("sentinel_password"),
             ssh_host=profile.get("ssh_host"),
             ssh_port=profile.get("ssh_port", 22),
             ssh_user=profile.get("ssh_user"),
@@ -509,10 +679,13 @@ class ConnectScreen(Screen):
             error_label.remove_class("visible")
 
             # Auto-save successful connections; use the returned profile for its ID.
-            saved_profile, _ = save_connection(profile)
-            if not self.current_profile_id:
+            saved_profile, _, persisted = save_connection(self._profile_for_storage(profile))
+            if persisted:
                 self.current_profile_id = saved_profile.get("id")
                 await self._refresh_history()
+            elif not persisted:
+                error_label.update("⚠️ Connected, but failed to save connection profile")
+                error_label.add_class("visible")
 
             self.app.redis_client = client  # type: ignore[attr-defined]
 

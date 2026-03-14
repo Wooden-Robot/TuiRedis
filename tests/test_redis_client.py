@@ -133,6 +133,150 @@ class TestRedisClient(unittest.TestCase):
         self.assertIsNone(client._client)
         self.assertIsNone(client._ssh_tunnel)
 
+    @patch("redis.sentinel.Sentinel")
+    def test_connect_with_sentinel(self, mock_sentinel_class):
+        client = RedisClient(
+            password="redis-pass",
+            db=2,
+            use_sentinel=True,
+            sentinel_host="sentinel.local",
+            sentinel_port=26379,
+            sentinel_master_name="mymaster",
+            sentinel_password="sentinel-pass",
+        )
+        sentinel_instance = mock_sentinel_class.return_value
+        redis_instance = MagicMock(spec=redis.Redis)
+        sentinel_instance.master_for.return_value = redis_instance
+
+        result, msg = client.connect()
+
+        self.assertTrue(result)
+        self.assertEqual(msg, "")
+        mock_sentinel_class.assert_called_once_with(
+            [("sentinel.local", 26379)],
+            sentinel_kwargs={
+                "socket_timeout": 10,
+                "socket_connect_timeout": 5,
+                "decode_responses": True,
+                "password": "sentinel-pass",
+            },
+        )
+        sentinel_instance.master_for.assert_called_once_with(
+            "mymaster",
+            password="redis-pass",
+            db=2,
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=10,
+        )
+        redis_instance.ping.assert_called_once()
+
+    @patch("redis.cluster.RedisCluster")
+    def test_connect_with_cluster(self, mock_cluster_class):
+        client = RedisClient(
+            host="cluster.local",
+            port=7000,
+            password="cluster-pass",
+            use_cluster=True,
+        )
+        cluster_instance = mock_cluster_class.return_value
+
+        result, msg = client.connect()
+
+        self.assertTrue(result)
+        self.assertEqual(msg, "")
+        mock_cluster_class.assert_called_once_with(
+            host="cluster.local",
+            port=7000,
+            password="cluster-pass",
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=10,
+        )
+        cluster_instance.ping.assert_called_once()
+
+    @patch("redis.sentinel.Sentinel")
+    def test_connect_with_multiple_sentinel_nodes(self, mock_sentinel_class):
+        client = RedisClient(
+            use_sentinel=True,
+            sentinel_nodes="s1:26379,s2:26380,s3",
+            sentinel_port=26379,
+            sentinel_master_name="mymaster",
+        )
+        sentinel_instance = mock_sentinel_class.return_value
+        redis_instance = MagicMock(spec=redis.Redis)
+        sentinel_instance.master_for.return_value = redis_instance
+
+        result, msg = client.connect()
+
+        self.assertTrue(result)
+        self.assertEqual(msg, "")
+        mock_sentinel_class.assert_called_once_with(
+            [("s1", 26379), ("s2", 26380), ("s3", 26379)],
+            sentinel_kwargs={
+                "socket_timeout": 10,
+                "socket_connect_timeout": 5,
+                "decode_responses": True,
+            },
+        )
+
+    def test_connect_sentinel_with_ssh_rejected(self):
+        client = RedisClient(use_sentinel=True, sentinel_master_name="mymaster", ssh_host="jump")
+        result, msg = client.connect()
+        self.assertFalse(result)
+        self.assertIn("SSH tunnel", msg)
+
+    def test_connect_cluster_with_sentinel_rejected(self):
+        client = RedisClient(use_cluster=True, use_sentinel=True)
+        result, msg = client.connect()
+        self.assertFalse(result)
+        self.assertIn("Sentinel", msg)
+
+    def test_connect_cluster_with_ssh_rejected(self):
+        client = RedisClient(use_cluster=True, ssh_host="jump")
+        result, msg = client.connect()
+        self.assertFalse(result)
+        self.assertIn("SSH tunnel", msg)
+
+    def test_get_string_retries_after_sentinel_connection_error(self):
+        client = RedisClient(use_sentinel=True, sentinel_master_name="mymaster")
+        first_redis = MagicMock(spec=redis.Redis)
+        second_redis = MagicMock(spec=redis.Redis)
+        first_redis.get.side_effect = redis.ConnectionError("failover")
+        second_redis.get.return_value = "value"
+        client._client = first_redis
+
+        def reconnect():
+            client._client = second_redis
+            return True, ""
+
+        client.connect = MagicMock(side_effect=reconnect)
+
+        result = client.get_string("mykey")
+
+        self.assertEqual(result, "value")
+        client.connect.assert_called_once()
+        second_redis.get.assert_called_once_with("mykey")
+
+    def test_set_string_retries_after_sentinel_readonly_error(self):
+        client = RedisClient(use_sentinel=True, sentinel_master_name="mymaster")
+        first_redis = MagicMock(spec=redis.Redis)
+        second_redis = MagicMock(spec=redis.Redis)
+        first_redis.set.side_effect = redis.ResponseError("READONLY You can't write against a read only replica.")
+        second_redis.set.return_value = True
+        client._client = first_redis
+
+        def reconnect():
+            client._client = second_redis
+            return True, ""
+
+        client.connect = MagicMock(side_effect=reconnect)
+
+        client.set_string("mykey", "value", ttl=30)
+
+        client.connect.assert_called_once()
+        second_redis.set.assert_called_once_with("mykey", "value", ex=30)
+
     def test_switch_db_success(self):
         result = self.client.switch_db(2)
         self.mock_redis.select.assert_called_once_with(2)
@@ -144,6 +288,15 @@ class TestRedisClient(unittest.TestCase):
         result = self.client.switch_db(2)
         self.assertFalse(result)
         self.assertEqual(self.client.db, 1)
+
+    def test_switch_db_rejected_for_cluster(self):
+        client = RedisClient(use_cluster=True)
+        client._client = MagicMock()
+
+        result = client.switch_db(0)
+
+        self.assertFalse(result)
+        client._client.select.assert_not_called()
 
     def test_scan_keys(self):
         self.mock_redis.scan.side_effect = [(1, ["key1", "key2"]), (0, ["key3"])]
@@ -174,6 +327,21 @@ class TestRedisClient(unittest.TestCase):
         self.assertEqual(len(result_keys), 55)
         self.assertEqual(self.mock_redis.scan.call_count, 3)
 
+    def test_scan_keys_paginated_cluster_uses_iterator_state(self):
+        client = RedisClient(use_cluster=True)
+        cluster_client = MagicMock()
+        cluster_client.scan_iter.return_value = iter(["k1", "k2", "k3", "k4", "k5"])
+        client._client = cluster_client
+
+        cursor_1, keys_1 = client.scan_keys_paginated(cursor=0, pattern="user:*", count=2)
+        cursor_2, keys_2 = client.scan_keys_paginated(cursor=cursor_1, pattern="user:*", count=2)
+        cursor_3, keys_3 = client.scan_keys_paginated(cursor=cursor_2, pattern="user:*", count=2)
+
+        self.assertEqual((cursor_1, keys_1), (2, ["k1", "k2"]))
+        self.assertEqual((cursor_2, keys_2), (4, ["k3", "k4"]))
+        self.assertEqual((cursor_3, keys_3), (0, ["k5"]))
+        cluster_client.scan_iter.assert_called_once_with(match="user:*", count=2)
+
     def test_get_type(self):
         self.mock_redis.type.return_value = "string"
         self.assertEqual(self.client.get_type("mykey"), "string")
@@ -189,6 +357,18 @@ class TestRedisClient(unittest.TestCase):
         self.assertEqual(mock_pipeline.type.call_count, 2)
         mock_pipeline.execute.assert_called_once()
 
+    def test_get_types_cluster_routes_per_key(self):
+        client = RedisClient(use_cluster=True)
+        cluster_client = MagicMock()
+        cluster_client.type.side_effect = ["string", "hash"]
+        client._client = cluster_client
+
+        result = client.get_types(["key1", "key2"])
+
+        self.assertEqual(result, {"key1": "string", "key2": "hash"})
+        cluster_client.pipeline.assert_not_called()
+        self.assertEqual(cluster_client.type.call_count, 2)
+
     def test_get_types_empty(self):
         self.assertEqual(self.client.get_types([]), {})
 
@@ -196,6 +376,18 @@ class TestRedisClient(unittest.TestCase):
         self.mock_redis.ttl.return_value = 100
         self.assertEqual(self.client.get_ttl("mykey"), 100)
         self.mock_redis.ttl.assert_called_once_with("mykey")
+
+    def test_get_ttls_cluster_routes_per_key(self):
+        client = RedisClient(use_cluster=True)
+        cluster_client = MagicMock()
+        cluster_client.ttl.side_effect = [100, -1]
+        client._client = cluster_client
+
+        result = client.get_ttls(["key1", "key2"])
+
+        self.assertEqual(result, {"key1": 100, "key2": -1})
+        cluster_client.pipeline.assert_not_called()
+        self.assertEqual(cluster_client.ttl.call_count, 2)
 
     def test_get_encoding(self):
         self.mock_redis.object.return_value = b"raw"
@@ -305,17 +497,111 @@ class TestRedisClient(unittest.TestCase):
         self.mock_redis.info.return_value = {"redis_version": "7.0.0"}
         self.assertEqual(self.client.get_server_info(), {"redis_version": "7.0.0"})
 
+    def test_get_server_info_aggregates_cluster_nodes(self):
+        client = RedisClient(use_cluster=True)
+        cluster_client = MagicMock()
+        cluster_client.info.return_value = {
+            "127.0.0.1:7000": {
+                "redis_version": "7.0.0",
+                "redis_mode": "cluster",
+                "os": "Linux",
+                "uptime_in_days": 2,
+                "connected_clients": 5,
+                "blocked_clients": 1,
+                "tracking_clients": 0,
+                "total_connections_received": 10,
+                "total_commands_processed": 100,
+                "instantaneous_ops_per_sec": 20,
+                "keyspace_hits": 11,
+                "keyspace_misses": 3,
+                "used_memory": 1024,
+                "used_memory_peak": 2048,
+                "maxmemory": 0,
+                "mem_fragmentation_ratio": 1.2,
+                "db0": {"keys": 4},
+            },
+            "127.0.0.1:7001": {
+                "redis_version": "7.0.0",
+                "redis_mode": "cluster",
+                "os": "Linux",
+                "uptime_in_days": 5,
+                "connected_clients": 7,
+                "blocked_clients": 0,
+                "tracking_clients": 2,
+                "total_connections_received": 30,
+                "total_commands_processed": 400,
+                "instantaneous_ops_per_sec": 40,
+                "keyspace_hits": 13,
+                "keyspace_misses": 5,
+                "used_memory": 2048,
+                "used_memory_peak": 4096,
+                "maxmemory": 1024,
+                "mem_fragmentation_ratio": 1.4,
+                "db0": {"keys": 6},
+            },
+        }
+        client._client = cluster_client
+
+        info = client.get_server_info()
+
+        self.assertEqual(info["redis_mode"], "cluster")
+        self.assertEqual(info["cluster_nodes"], 2)
+        self.assertEqual(info["uptime_in_days"], 5)
+        self.assertEqual(info["connected_clients"], 12)
+        self.assertEqual(info["total_commands_processed"], 500)
+        self.assertEqual(info["db0"], {"keys": 10})
+        self.assertEqual(info["used_memory_human"], "3.0KB")
+
     def test_get_keyspace_info(self):
         self.mock_redis.info.return_value = {"db0": {"keys": 10}, "db1": {"keys": 5}, "dbx": "invalid"}
         self.assertEqual(self.client.get_keyspace_info(), {0: 10, 1: 5})
+
+    def test_get_keyspace_info_aggregates_cluster_nodes(self):
+        client = RedisClient(use_cluster=True)
+        cluster_client = MagicMock()
+        cluster_client.info.return_value = {
+            "127.0.0.1:7000": {"db0": {"keys": 10}, "db1": {"keys": 2}},
+            "127.0.0.1:7001": {"db0": {"keys": 7}},
+        }
+        client._client = cluster_client
+
+        self.assertEqual(client.get_keyspace_info(), {0: 17, 1: 2})
 
     def test_get_keyspace_info_error(self):
         self.mock_redis.info.side_effect = redis.RedisError()
         self.assertEqual(self.client.get_keyspace_info(), {})
 
+    def test_get_database_count_from_config(self):
+        self.mock_redis.config_get.return_value = {"databases": "32"}
+        self.assertEqual(self.client.get_database_count(), 32)
+        self.mock_redis.config_get.assert_called_once_with("databases")
+
+    def test_get_database_count_falls_back_to_keyspace(self):
+        self.mock_redis.config_get.side_effect = redis.RedisError()
+        self.mock_redis.info.return_value = {"db0": {"keys": 10}, "db7": {"keys": 5}}
+        self.assertEqual(self.client.get_database_count(), 8)
+
+    def test_get_database_count_falls_back_to_current_db(self):
+        self.mock_redis.config_get.side_effect = redis.RedisError()
+        self.mock_redis.info.side_effect = redis.RedisError()
+        self.client.db = 42
+        self.assertEqual(self.client.get_database_count(), 43)
+
+    def test_get_database_count_returns_one_for_cluster(self):
+        client = RedisClient(use_cluster=True, db=42)
+        self.assertEqual(client.get_database_count(), 1)
+
     def test_get_db_size(self):
         self.mock_redis.dbsize.return_value = 100
         self.assertEqual(self.client.get_db_size(), 100)
+
+    def test_get_db_size_sums_cluster_nodes(self):
+        client = RedisClient(use_cluster=True)
+        cluster_client = MagicMock()
+        cluster_client.dbsize.return_value = {"127.0.0.1:7000": 10, "127.0.0.1:7001": 15}
+        client._client = cluster_client
+
+        self.assertEqual(client.get_db_size(), 25)
 
     def test_execute_command(self):
         self.mock_redis.execute_command.return_value = b"OK"
@@ -332,6 +618,29 @@ class TestRedisClient(unittest.TestCase):
 
         self.mock_redis.execute_command.return_value = None
         self.assertEqual(self.client.execute_command("GET missing"), "(nil)")
+
+    def test_execute_command_rejects_select_for_cluster(self):
+        client = RedisClient(use_cluster=True)
+        client._client = MagicMock()
+
+        self.assertEqual(client.execute_command("SELECT 1"), "(error) SELECT is not supported in Redis Cluster")
+        client._client.execute_command.assert_not_called()
+
+    def test_execute_command_formats_cluster_node_results(self):
+        client = RedisClient(use_cluster=True)
+        cluster_client = MagicMock()
+        cluster_client.execute_command.return_value = {
+            "127.0.0.1:7000": {"db0": {"keys": 2}, "role": "master"},
+            "127.0.0.1:7001": {"db0": {"keys": 3}, "role": "master"},
+        }
+        client._client = cluster_client
+
+        rendered = client.execute_command("INFO")
+
+        self.assertIn("127.0.0.1:7000:", rendered)
+        self.assertIn("db0:", rendered)
+        self.assertIn("keys: 2", rendered)
+        self.assertIn("role: master", rendered)
 
     def test_execute_command_errors(self):
         self.mock_redis.execute_command.side_effect = redis.ResponseError("ERR syntax")

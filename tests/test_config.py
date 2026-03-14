@@ -31,8 +31,9 @@ def test_save_connection_new(tmp_path):
             "port": 6379,
             "db": 0,
         }
-        saved_profile, connections = save_connection(profile)
+        saved_profile, connections, persisted = save_connection(profile)
 
+        assert persisted is True
         assert len(connections) == 1
         assert connections[0]["name"] == "Test DB"
         assert "id" in connections[0]  # ID must be generated
@@ -55,7 +56,8 @@ def test_save_connection_update(tmp_path):
             "port": 6379,
             "db": 0,
         }
-        saved1, conns1 = save_connection(profile)
+        saved1, conns1, persisted1 = save_connection(profile)
+        assert persisted1 is True
         conn_id = saved1["id"]
 
         # Update name
@@ -63,8 +65,9 @@ def test_save_connection_update(tmp_path):
         profile_update["name"] = "DB 1 Updated"
         profile_update["port"] = 6380
 
-        saved2, conns2 = save_connection(profile_update)  # type: ignore
+        saved2, conns2, persisted2 = save_connection(profile_update)  # type: ignore
 
+        assert persisted2 is True
         assert len(conns2) == 1
         assert conns2[0]["id"] == conn_id
         assert conns2[0]["name"] == "DB 1 Updated"
@@ -76,9 +79,11 @@ def test_save_multiple_connections(tmp_path):
         p1 = {"host": "h1", "port": 1}
         p2 = {"host": "h2", "port": 2}
 
-        save_connection(p1)  # type: ignore
-        _, connections = save_connection(p2)  # type: ignore
+        _, _, persisted1 = save_connection(p1)  # type: ignore
+        _, connections, persisted2 = save_connection(p2)  # type: ignore
 
+        assert persisted1 is True
+        assert persisted2 is True
         assert len(connections) == 2
         assert connections[0]["host"] == "h1"
         assert connections[1]["host"] == "h2"
@@ -89,12 +94,15 @@ def test_save_multiple_connections(tmp_path):
 
 def test_delete_connection(tmp_path):
     with patch("tuiredis.config.Path.home", return_value=tmp_path):
-        save_connection({"name": "c1", "host": "h1", "port": 1})  # type: ignore
-        saved2, _ = save_connection({"name": "c2", "host": "h2", "port": 2})  # type: ignore
+        _, _, persisted1 = save_connection({"name": "c1", "host": "h1", "port": 1})  # type: ignore
+        saved2, _, persisted2 = save_connection({"name": "c2", "host": "h2", "port": 2})  # type: ignore
 
+        assert persisted1 is True
+        assert persisted2 is True
         id_to_delete = saved2["id"]
 
-        after_del = delete_connection(id_to_delete)
+        after_del, persisted = delete_connection(id_to_delete)
+        assert persisted is True
         assert len(after_del) == 1
         assert after_del[0]["name"] == "c1"
 
@@ -121,34 +129,61 @@ def test_save_connection_deduplication(tmp_path):
     """Saving a connection with the same host/port/db should update, not duplicate."""
     with patch("tuiredis.config.Path.home", return_value=tmp_path):
         p1 = {"host": "localhost", "port": 6379, "db": 0}
-        saved1, _ = save_connection(p1)  # type: ignore
+        saved1, _, persisted1 = save_connection(p1)  # type: ignore
+        assert persisted1 is True
         conn_id = saved1["id"]
 
         # Second save — same details, no ID passed → should find and reuse the ID
         p2 = {"host": "localhost", "port": 6379, "db": 0, "name": "Updated"}
-        saved2, conns = save_connection(p2)  # type: ignore
+        saved2, conns, persisted2 = save_connection(p2)  # type: ignore
+        assert persisted2 is True
         assert len(conns) == 1
         assert saved2["id"] == conn_id
         assert conns[0]["name"] == "Updated"
 
 
-def test_save_connection_write_failure(tmp_path):
-    """save_connection should not raise even if write fails; temp file is cleaned up."""
+def test_save_connection_different_passwords_do_not_deduplicate(tmp_path):
     with patch("tuiredis.config.Path.home", return_value=tmp_path):
-        with patch("builtins.open", side_effect=OSError("disk full")):
-            # Should not raise
-            profile, conns = save_connection({"name": "X", "host": "h", "port": 1})  # type: ignore
-            # Returns what was built in memory even if disk write failed
+        _, _, persisted1 = save_connection({"host": "localhost", "port": 6379, "db": 0, "password": "a"})  # type: ignore
+        _, conns, persisted2 = save_connection({"host": "localhost", "port": 6379, "db": 0, "password": "b"})  # type: ignore
+
+        assert persisted1 is True
+        assert persisted2 is True
+        assert len(conns) == 2
+
+
+def test_save_connection_write_failure(tmp_path):
+    """save_connection should report persistence failure without raising."""
+    with patch("tuiredis.config.Path.home", return_value=tmp_path):
+        with patch("pathlib.Path.open", side_effect=OSError("disk full")):
+            profile, conns, persisted = save_connection({"name": "X", "host": "h", "port": 1})  # type: ignore
             assert profile.get("name") == "X"
+            assert len(conns) == 1
+            assert persisted is False
+            assert not get_connections_file().exists()
 
 
 def test_delete_connection_nonexistent_id(tmp_path):
     """delete_connection with an unknown ID should be a no-op (list unchanged)."""
     with patch("tuiredis.config.Path.home", return_value=tmp_path):
-        save_connection({"name": "keep", "host": "h1", "port": 1})  # type: ignore
-        result = delete_connection("does-not-exist")
+        _, _, persisted1 = save_connection({"name": "keep", "host": "h1", "port": 1})  # type: ignore
+        assert persisted1 is True
+        result, persisted2 = delete_connection("does-not-exist")
+        assert persisted2 is True
         assert len(result) == 1
         assert result[0]["name"] == "keep"
+
+
+def test_delete_connection_write_failure(tmp_path):
+    """delete_connection should report persistence failure without raising."""
+    with patch("tuiredis.config.Path.home", return_value=tmp_path):
+        saved, _, persisted1 = save_connection({"name": "keep", "host": "h1", "port": 1})  # type: ignore
+        assert persisted1 is True
+        with patch("pathlib.Path.open", side_effect=OSError("disk full")):
+            result, persisted2 = delete_connection(saved["id"])
+        assert persisted2 is False
+        assert result == []
+        assert load_connections()[0]["id"] == saved["id"]
 
 
 def test_get_config_dir_mkdir_failure(tmp_path):

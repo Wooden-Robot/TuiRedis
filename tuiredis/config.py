@@ -21,6 +21,14 @@ class ConnectionProfile(TypedDict, total=False):
     port: int
     db: int
     password: str | None
+    save_secrets: bool
+    use_cluster: bool
+    use_sentinel: bool
+    sentinel_nodes: str | None
+    sentinel_host: str | None
+    sentinel_port: int
+    sentinel_master_name: str | None
+    sentinel_password: str | None
 
     # SSH fields
     use_ssh: bool
@@ -66,11 +74,11 @@ def load_connections() -> list[ConnectionProfile]:
         return []
 
 
-def save_connection(profile: ConnectionProfile) -> tuple[ConnectionProfile, list[ConnectionProfile]]:
+def save_connection(profile: ConnectionProfile) -> tuple[ConnectionProfile, list[ConnectionProfile], bool]:
     """Save a connection profile. If it lacks an ID, generate one.
     Updates existing profiles with the same ID.
     If no ID is passed, checks for existing profiles with the same connection details to update instead of duplicate.
-    Returns a tuple of (saved_profile, updated_list_of_profiles).
+    Returns a tuple of (saved_profile, updated_list_of_profiles, persisted).
     """
     config_file = get_connections_file()
     connections = load_connections()
@@ -86,10 +94,20 @@ def save_connection(profile: ConnectionProfile) -> tuple[ConnectionProfile, list
                 conn.get("host") == profile.get("host")
                 and conn.get("port") == profile.get("port")
                 and conn.get("db") == profile.get("db")
+                and conn.get("password") == profile.get("password")
+                and conn.get("use_cluster") == profile.get("use_cluster")
+                and conn.get("use_sentinel") == profile.get("use_sentinel")
+                and conn.get("sentinel_nodes") == profile.get("sentinel_nodes")
+                and conn.get("sentinel_host") == profile.get("sentinel_host")
+                and conn.get("sentinel_port") == profile.get("sentinel_port")
+                and conn.get("sentinel_master_name") == profile.get("sentinel_master_name")
+                and conn.get("sentinel_password") == profile.get("sentinel_password")
                 and conn.get("use_ssh") == profile.get("use_ssh")
                 and conn.get("ssh_host") == profile.get("ssh_host")
                 and conn.get("ssh_port") == profile.get("ssh_port")
                 and conn.get("ssh_user") == profile.get("ssh_user")
+                and conn.get("ssh_password") == profile.get("ssh_password")
+                and conn.get("ssh_private_key") == profile.get("ssh_private_key")
             ):
                 # Found exact same connection details, update this one instead of creating new
                 profile["id"] = conn.get("id", str(uuid.uuid4()))
@@ -125,11 +143,13 @@ def save_connection(profile: ConnectionProfile) -> tuple[ConnectionProfile, list
         except OSError:
             pass
 
-    return profile, connections
+        return profile, connections, False
+
+    return profile, connections, True
 
 
-def delete_connection(profile_id: str) -> list[ConnectionProfile]:
-    """Delete a connection profile by ID. Returns the updated list."""
+def delete_connection(profile_id: str) -> tuple[list[ConnectionProfile], bool]:
+    """Delete a connection profile by ID. Returns (updated_list, persisted)."""
     config_file = get_connections_file()
     connections = load_connections()
 
@@ -148,4 +168,6 @@ def delete_connection(profile_id: str) -> list[ConnectionProfile]:
         except OSError:
             pass
 
-    return connections
+        return connections, False
+
+    return connections, True

@@ -35,9 +35,21 @@ class ServerInfo(Widget):
     def _format_info(self, info: dict) -> str:
         """Format Redis INFO dict into a readable display."""
         lines: list[str] = []
+        redis_mode = str(info.get("redis_mode") or "standalone")
 
         # Server section
         lines.append("[bold #DC382D]━━ Server ━━[/]")
+        if redis_mode == "cluster":
+            cluster_nodes = info.get("cluster_nodes")
+            if cluster_nodes is not None:
+                lines.append(
+                    f"[dim]Aggregated cluster view across {cluster_nodes} node"
+                    f"{'' if cluster_nodes == 1 else 's'}.[/]"
+                )
+            else:
+                lines.append("[dim]Aggregated cluster view.[/]")
+        elif redis_mode == "sentinel":
+            lines.append("[dim]Sentinel control-plane view. Keyspace metrics may be unavailable.[/]")
         for key in ["redis_version", "redis_mode", "os", "uptime_in_days", "process_id"]:
             if key in info:
                 label = key.replace("_", " ").title()

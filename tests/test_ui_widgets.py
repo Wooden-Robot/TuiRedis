@@ -49,6 +49,30 @@ async def test_server_info(mock_client):
 
 
 @pytest.mark.asyncio
+async def test_server_info_shows_cluster_aggregation_hint():
+    app = DummyApp()
+    async with app.run_test() as pilot:
+        server_info = app.query_one(ServerInfo)
+        server_info.update_info({"redis_mode": "cluster", "cluster_nodes": 3, "redis_version": "7.0.0"})
+        await pilot.pause(0.1)
+
+        text = str(server_info.query_one("#si-text").render())
+        assert "Aggregated cluster view across 3 nodes" in text
+
+
+@pytest.mark.asyncio
+async def test_server_info_shows_sentinel_hint():
+    app = DummyApp()
+    async with app.run_test() as pilot:
+        server_info = app.query_one(ServerInfo)
+        server_info.update_info({"redis_mode": "sentinel", "redis_version": "7.0.0"})
+        await pilot.pause(0.1)
+
+        text = str(server_info.query_one("#si-text").render())
+        assert "Sentinel control-plane view" in text
+
+
+@pytest.mark.asyncio
 async def test_command_input():
     app = DummyApp()
     async with app.run_test() as pilot:
@@ -787,4 +811,3 @@ async def test_key_detail_delete_emits_message():
     deleted = [m for m in captured if isinstance(m, KeyDetail.KeyDeleted)]
     assert len(deleted) == 1
     assert deleted[0].key == "mykey"
-
